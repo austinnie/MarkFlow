@@ -9,8 +9,11 @@ import threading
 import sys
 import io
 import json
+import os
+import subprocess
+import platform
 from datetime import datetime
-from typing import Dict, Any, Optional  # 添加这行
+from typing import Dict, Any, Optional, List
 
 # 导入技能核心
 from markflow.core.executor import SkillExecutor
@@ -211,8 +214,6 @@ class MarkFlowLauncher:
         self._log(f"📁 技能目录: {self.skill_dir.absolute()}", 'info')
         self._log("💡 请从左侧选择技能开始使用\n", 'info')
     
-
-
     def _load_skills(self):
         """加载技能列表"""
         self.skill_listbox.delete(0, tk.END)
@@ -249,7 +250,6 @@ class MarkFlowLauncher:
         self.skill_count_label.config(text=f"共 {len(skills)} 个技能")
         self._log(f"🔄 已加载 {len(skills)} 个技能", 'info')
     
-        
     def _on_skill_select(self, event):
         """技能选择事件"""
         selection = self.skill_listbox.curselection()
@@ -285,84 +285,229 @@ class MarkFlowLauncher:
         self.execute_btn.config(state=tk.NORMAL)
         
         self._log(f"✅ 已选择技能: {skill_name}", 'success')
+    
 
     def _build_param_inputs(self, metadata: Dict):
-        """动态生成参数输入控件"""
+        """动态生成参数输入控件（分组折叠）"""
         # 清空旧控件
         for widget in self.param_container.winfo_children():
             widget.destroy()
         
         self.param_widgets = {}
-        
-        # 获取 inputs
         inputs = metadata.get('inputs', [])
         
-        print(f"\n🏗️ 构建参数: {metadata.get('name', 'unknown')}")
-        print(f"   inputs 数量: {len(inputs)}")
-        for inp in inputs:
-            print(f"   - {inp.get('name')} ({inp.get('type')})")
-        
         if not inputs:
-            # 显示提示
             label = ttk.Label(self.param_container, 
                               text="⚠️ 此技能没有定义参数", 
-                              font=('Arial', 10), 
-                              foreground='orange')
+                              font=('Arial', 10), foreground='orange')
             label.pack(anchor=tk.W, pady=5)
-            
-            # 添加额外提示：手动添加常用参数
-            if self.current_skill == 'ImageViewer':
-                ttk.Label(self.param_container, 
-                         text="💡 提示: action, source_dir, file 等参数可通过命令行执行", 
-                         font=('Arial', 8), foreground='gray').pack(anchor=tk.W)
             return
         
-        # 创建参数输入
-        for inp in inputs:
-            name = inp.get('name', '')
-            desc = inp.get('description', '')
-            required = inp.get('required', False)
-            param_type = inp.get('type', 'string')
-            
-            # 每行一个参数
-            frame = ttk.Frame(self.param_container)
-            frame.pack(fill=tk.X, pady=3)
-            
-            # 标签
-            label_text = name
-            if required:
-                label_text += " *"
-            label = ttk.Label(frame, text=label_text, width=20, anchor=tk.W,
-                             font=('Arial', 9))
-            label.pack(side=tk.LEFT, padx=(0, 5))
-            
-            # 输入框
-            if param_type in ['integer', 'float']:
-                var = tk.StringVar(value='')
-                entry = ttk.Entry(frame, textvariable=var, width=30)
-                entry.pack(side=tk.LEFT)
-                self.param_widgets[name] = {'var': var, 'type': param_type}
-            elif param_type == 'boolean':
-                var = tk.BooleanVar(value=False)
-                check = ttk.Checkbutton(frame, variable=var)
-                check.pack(side=tk.LEFT)
-                self.param_widgets[name] = {'var': var, 'type': 'boolean'}
-            else:
-                var = tk.StringVar(value='')
-                entry = ttk.Entry(frame, textvariable=var, width=30)
-                entry.pack(side=tk.LEFT)
-                self.param_widgets[name] = {'var': var, 'type': 'string'}
-            
-            # 描述
-            if desc:
-                ttk.Label(frame, text=desc[:40], font=('Arial', 8), 
-                          foreground='gray').pack(side=tk.LEFT, padx=5)
+        # 定义参数分组
+        skill_name = self.current_skill or ''
+        groups = self._get_param_groups(skill_name, inputs)
         
-        # 添加必填提示
-        ttk.Label(self.param_container, text="* 必填参数", 
-                  font=('Arial', 8), foreground='red').pack(anchor=tk.W, pady=2)
-              
-           
+        # 渲染分组
+        for group_name, group_inputs in groups.items():
+            # 分组标题（可点击折叠）
+            group_frame = ttk.Frame(self.param_container)
+            group_frame.pack(fill=tk.X, pady=(5, 0))
+            
+            # 判断是否有必填参数
+            has_required = any(inp.get('required', False) for inp in group_inputs)
+            is_expanded = has_required
+            
+            # 分组标题按钮
+            toggle_btn = ttk.Button(group_frame, text=f"▼ {group_name}",
+                                    command=lambda f=group_frame: self._toggle_group(f),
+                                    width=20)
+            toggle_btn.pack(side=tk.LEFT)
+            
+            # 分组内容容器
+            content_frame = ttk.Frame(self.param_container)
+            content_frame.pack(fill=tk.X, padx=(20, 0))
+            
+            # 存储引用 - 直接设置为属性
+            content_frame._is_expanded = is_expanded
+            content_frame._toggle_btn = toggle_btn
+            
+            if not is_expanded:
+                content_frame.pack_forget()
+                toggle_btn.config(text=f"▶ {group_name}")
+            
+            # 渲染参数
+            for inp in group_inputs:
+                self._render_param(content_frame, inp)
+            
+    def _get_param_groups(self, skill_name: str, inputs: List[Dict]) -> Dict[str, List[Dict]]:
+        """获取参数分组"""
+        groups = {}
+        
+        # 根据技能名称定义分组规则
+        if skill_name == 'Sdimagegenerator':
+            groups = {
+                '📌 基础参数': [],
+                '📐 尺寸参数': [],
+                '⚙️ 生成参数': [],
+                '📁 输出参数': []
+            }
+            for inp in inputs:
+                name = inp.get('name', '')
+                if name in ['prompt', 'negative_prompt', 'model_name']:
+                    groups['📌 基础参数'].append(inp)
+                elif name in ['width', 'height']:
+                    groups['📐 尺寸参数'].append(inp)
+                elif name in ['steps', 'cfg_scale', 'seed', 'batch_size', 'scheduler']:
+                    groups['⚙️ 生成参数'].append(inp)
+                else:
+                    groups['📁 输出参数'].append(inp)
+        
+        elif skill_name == 'ImageToolbox':
+            groups = {
+                '📌 必填参数': [],
+                '🖼️ 图片操作': [],
+                '💧 水印设置': [],
+                '✂️ 裁剪/旋转': [],
+                '🎨 颜色调整': [],
+                '📁 输出参数': []
+            }
+            for inp in inputs:
+                name = inp.get('name', '')
+                if name in ['source_dir', 'operations']:
+                    groups['📌 必填参数'].append(inp)
+                elif name in ['target_format', 'width', 'height', 'quality']:
+                    groups['🖼️ 图片操作'].append(inp)
+                elif name in ['watermark_text', 'watermark_position', 'watermark_opacity']:
+                    groups['💧 水印设置'].append(inp)
+                elif name in ['crop_x', 'crop_y', 'crop_width', 'crop_height', 'rotate_angle', 'flip_direction']:
+                    groups['✂️ 裁剪/旋转'].append(inp)
+                elif name in ['brightness', 'contrast', 'saturation']:
+                    groups['🎨 颜色调整'].append(inp)
+                else:
+                    groups['📁 输出参数'].append(inp)
+        
+        elif skill_name == 'ImageViewer':
+            groups = {
+                '📌 必填参数': [],
+                '🔍 浏览参数': [],
+                '🎞️ 幻灯片参数': [],
+                '📤 导出参数': []
+            }
+            for inp in inputs:
+                name = inp.get('name', '')
+                if name in ['action', 'file']:
+                    groups['📌 必填参数'].append(inp)
+                elif name in ['source_dir', 'view_mode', 'sort_by', 'sort_order', 'filter', 'thumbnail_size']:
+                    groups['🔍 浏览参数'].append(inp)
+                elif name in ['slideshow_interval', 'fullscreen']:
+                    groups['🎞️ 幻灯片参数'].append(inp)
+                elif name in ['export_format', 'export_quality', 'export_size']:
+                    groups['📤 导出参数'].append(inp)
+                else:
+                    groups['📤 导出参数'].append(inp)
+        
+        elif skill_name == 'DocGenerator':
+            groups = {
+                '📌 必填参数': [],
+                '📄 文档参数': []
+            }
+            for inp in inputs:
+                if inp.get('required', False):
+                    groups['📌 必填参数'].append(inp)
+                else:
+                    groups['📄 文档参数'].append(inp)
+        
+        elif skill_name == 'NovelWriterOllama':
+            groups = {
+                '📌 必填参数': [],
+                '📝 写作参数': []
+            }
+            for inp in inputs:
+                if inp.get('required', False):
+                    groups['📌 必填参数'].append(inp)
+                else:
+                    groups['📝 写作参数'].append(inp)
+        
+        else:
+            # 默认：按必填/可选分组
+            groups = {
+                '📌 必填参数': [],
+                '🔧 可选参数': []
+            }
+            for inp in inputs:
+                if inp.get('required', False):
+                    groups['📌 必填参数'].append(inp)
+                else:
+                    groups['🔧 可选参数'].append(inp)
+        
+        # 移除空分组
+        return {k: v for k, v in groups.items() if v}
+    
+
+    def _toggle_group(self, content_frame):
+        """切换分组折叠状态"""
+        if hasattr(content_frame, '_is_expanded') and content_frame._is_expanded:
+            content_frame.pack_forget()
+            content_frame._is_expanded = False
+            if hasattr(content_frame, '_toggle_btn'):
+                # 获取当前文本，去掉前面的图标
+                current_text = content_frame._toggle_btn.cget('text')
+                # 如果以 ▼ 开头，改为 ▶
+                if current_text.startswith('▼'):
+                    content_frame._toggle_btn.config(text=f"▶ {current_text[2:]}")
+                else:
+                    content_frame._toggle_btn.config(text=f"▶ {current_text}")
+        else:
+            content_frame.pack(fill=tk.X, padx=(20, 0))
+            content_frame._is_expanded = True
+            if hasattr(content_frame, '_toggle_btn'):
+                current_text = content_frame._toggle_btn.cget('text')
+                if current_text.startswith('▶'):
+                    content_frame._toggle_btn.config(text=f"▼ {current_text[2:]}")
+                else:
+                    content_frame._toggle_btn.config(text=f"▼ {current_text}")
+                
+    def _render_param(self, parent, inp: Dict):
+        """渲染单个参数"""
+        name = inp.get('name', '')
+        desc = inp.get('description', '')
+        required = inp.get('required', False)
+        param_type = inp.get('type', 'string')
+        
+        frame = ttk.Frame(parent)
+        frame.pack(fill=tk.X, pady=2)
+        
+        # 标签
+        label_text = name
+        if required:
+            label_text += " *"
+        label = ttk.Label(frame, text=label_text, width=18, anchor=tk.W,
+                         font=('Arial', 9))
+        label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        # 输入框
+        if param_type in ['integer', 'float']:
+            var = tk.StringVar(value='')
+            entry = ttk.Entry(frame, textvariable=var, width=30)
+            entry.pack(side=tk.LEFT)
+            self.param_widgets[name] = {'var': var, 'type': param_type}
+        elif param_type == 'boolean':
+            var = tk.BooleanVar(value=False)
+            check = ttk.Checkbutton(frame, variable=var)
+            check.pack(side=tk.LEFT)
+            self.param_widgets[name] = {'var': var, 'type': 'boolean'}
+        else:
+            var = tk.StringVar(value='')
+            entry = ttk.Entry(frame, textvariable=var, width=30)
+            entry.pack(side=tk.LEFT)
+            self.param_widgets[name] = {'var': var, 'type': 'string'}
+        
+        # 描述（缩短）
+        if desc:
+            short_desc = desc[:35] + '...' if len(desc) > 35 else desc
+            ttk.Label(frame, text=short_desc, font=('Arial', 8), 
+                      foreground='gray').pack(side=tk.LEFT, padx=5)
+    
     def _get_params(self) -> Dict:
         """获取所有参数值"""
         params = {}
@@ -466,9 +611,6 @@ class MarkFlowLauncher:
     
     def _open_skill_dir(self):
         """打开技能目录"""
-        import subprocess
-        import platform
-        
         skill_path = self.skill_dir.absolute()
         if not skill_path.exists():
             skill_path.mkdir(parents=True)
