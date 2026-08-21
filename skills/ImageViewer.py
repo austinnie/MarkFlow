@@ -406,7 +406,37 @@ class ImageViewer:
                 
                 result = self._browse(source_dir, view_mode, sort_by, sort_order, filter_type, thumbnail_size)
                 result['action'] = 'browse'
-            
+
+            elif action == 'view':
+                # 🖼️ 用系统默认程序打开图片
+                import subprocess
+                import platform
+                
+                file_path = Path(params['file'])
+                
+                if not file_path.exists():
+                    raise ValueError(f"文件不存在: {file_path}")
+                
+                try:
+                    if platform.system() == 'Windows':
+                        os.startfile(str(file_path))
+                    elif platform.system() == 'Darwin':  # macOS
+                        subprocess.run(['open', str(file_path)])
+                    else:  # Linux
+                        subprocess.run(['xdg-open', str(file_path)])
+                    
+                    result = {
+                        'message': f'✅ 已打开图片: {file_path.name}',
+                        'file': str(file_path),
+                        'action': 'view'
+                    }
+                except Exception as e:
+                    logger.error(f"打开图片失败: {e}")
+                    result = {
+                        'error': f'打开失败: {e}',
+                        'action': 'view'
+                    }
+                
             elif action == 'info':
                 file_path = Path(params['file'])
                 info = self._get_file_info(file_path)
