@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -93,8 +94,11 @@ class VoiceAssistant:
             raise ValueError(f"不支持的操作: {action}，支持: tts, stt, list_voices")
         
         if action == 'tts':
-            if 'text' not in kwargs or not kwargs['text']:
-                raise ValueError("tts 操作需要 text 参数")
+            # 支持 text 或 text_file
+            text = kwargs.get('text', '')
+            text_file = kwargs.get('text_file', '')
+            if not text and not text_file:
+                raise ValueError("tts 操作需要 text 或 text_file 参数")
         
         if action == 'stt':
             if 'audio_file' not in kwargs or not kwargs['audio_file']:
@@ -104,6 +108,7 @@ class VoiceAssistant:
                 raise ValueError(f"音频文件不存在: {audio_path}")
         
         return kwargs
+    
     
     def _list_voices(self) -> Dict:
         """列出可用语音"""
@@ -137,23 +142,36 @@ class VoiceAssistant:
             "default": self.config.get('default_voice', 'zh-CN-XiaoxiaoNeural')
         }
     
+    def _generate_filename(self, text: str, voice: str, output_dir: Path) -> str:
+        """生成有意义的文件名"""
+        # 取文本前 15 个字符作为名称
+        text_preview = text[:15].strip()
+        # 移除特殊字符
+        text_preview = re.sub(r'[^\w\u4e00-\u9fff]', '', text_preview)
+        if not text_preview:
+            text_preview = "语音"
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        voice_short = voice.split('-')[0] if '-' in voice else voice[:8]
+        
+        return f"{text_preview}_{voice_short}_{timestamp}.mp3"
+    
 
     def _tts(self, text: str, voice: str = None, speed: float = None,
              pitch: str = None, output_file: str = None) -> Dict:
         """文字转语音"""
         if not EDGE_TTS_AVAILABLE:
-            return {"error": "edge-tts 未安装，请运行: pip install edge-tts", "status": "error"}
+            return {"error": "edge-tts 未安装", "status": "error"}
         
         voice = voice or self.config.get('default_voice', 'zh-CN-XiaoxiaoNeural')
         speed = speed or self.config.get('default_speed', 1.0)
         
-        # 创建输出目录
         output_dir = Path(self.config.get('output_dir', './audio_output'))
         output_dir.mkdir(parents=True, exist_ok=True)
         
         if not output_file:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_file = str(output_dir / f"tts_{timestamp}.mp3")
+            # 生成有意义的文件名
+            output_file = str(output_dir / self._generate_filename(text, voice, output_dir))
         else:
             output_path = Path(output_file)
             if not output_path.parent.exists():
@@ -161,11 +179,7 @@ class VoiceAssistant:
         
         try:
             import asyncio
-            
-            # 语速设置
             rate = f"{int((speed - 1.0) * 100):+d}%"
-            
-            # 只传 text, voice, rate，不传 pitch
             communicate = edge_tts.Communicate(text, voice, rate=rate)
             
             loop = asyncio.new_event_loop()
@@ -177,7 +191,7 @@ class VoiceAssistant:
             return {
                 "audio_path": output_file,
                 "duration": duration,
-                "text": text,
+                "text": text[:100] + "..." if len(text) > 100 else text,
                 "voice": voice,
                 "speed": speed,
                 "status": "success"
@@ -224,7 +238,95 @@ class VoiceAssistant:
         except Exception as e:
             logger.error(f"STT 失败: {e}")
             return {"error": str(e), "status": "error"}
+
+
+    def _read_text_file(self, file_path: str) -> str:
+        """读取文本文件并清理 Markdown 标记"""
+        path = Path(file_path)
+        if not path.exists():
+            raise ValueError(f"文件不存在: {file_path}")
+        
+        with open(path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # 清理 Markdown 标记
+        content = self._clean_markdown(content)
+        
+        return content.strip()
+
+    def _clean_markdown(self, text: str) -> str:
+        """清理 Markdown 标记，只保留纯文本"""
+        import re
+        
+        # 移除代码块 ```...```
+        text = re.sub(r'```.*?```', '', text, flags=re.DOTALL)
+        
+        # 移除标题标记 # ## ### 等
+        text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+        
+        # 移除分割线 --- 或 *** 或 ===
+        text = re.sub(r'^[-=*]{3,}\s*$', '', text, flags=re.MULTILINE)
+        
+        # 移除粗体 **text** 或 __text__
+        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+        text = re.sub(r'__(.+?)__', r'\1', text)
+        
+        # 移除斜体 *text* 或 _text_
+        text = re.sub(r'\*(.+?)\*', r'\1', text)
+        text = re.sub(r'_(.+?)_', r'\1', text)
+        
+        # 移除行内代码 `code`
+        text = re.sub(r'`(.+?)`', r'\1', text)
+        
+        # 移除链接 [text](url)
+        text = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', text)
+        
+        # 移除图片 ![alt](url)
+        text = re.sub(r'!\[(.+?)\]\(.+?\)', r'\1', text)
+        
+        # 移除列表标记 - 或 * 或 1. 等
+        text = re.sub(r'^[\s]*[-*+]\s+', '', text, flags=re.MULTILINE)
+        text = re.sub(r'^[\s]*\d+\.\s+', '', text, flags=re.MULTILINE)
+        
+        # 移除多余空行
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        
+        # 移除分隔线字符（单独一行的 ======）
+        text = re.sub(r'^[=\-]{10,}\s*$', '', text, flags=re.MULTILINE)
+        
+        return text
     
+    def _split_text(self, text: str, chunk_size: int = 500, auto_split: bool = True) -> List[str]:
+        """将长文本分割成段落"""
+        if not text:
+            return []
+        
+        # 按句子分割
+        if auto_split:
+            import re
+            # 按中文标点分割：。！？；\n
+            sentences = re.split(r'[。！？；\n]+', text)
+            sentences = [s.strip() for s in sentences if s.strip()]
+        else:
+            sentences = [text]
+        
+        # 合并成 chunk
+        chunks = []
+        current = ""
+        for sentence in sentences:
+            if len(current) + len(sentence) <= chunk_size:
+                current += sentence + "。"
+            else:
+                if current:
+                    chunks.append(current.strip())
+                current = sentence + "。"
+        
+        if current:
+            chunks.append(current.strip())
+        
+        return chunks
+    
+
     def execute(self, **kwargs) -> Dict[str, Any]:
         """执行操作"""
         start_time = time.time()
@@ -238,12 +340,64 @@ class VoiceAssistant:
                 result = self._list_voices()
             
             elif action == 'tts':
-                text = params.get('text')
+                text = params.get('text', '')
+                text_file = params.get('text_file', '')
                 voice = params.get('voice', self.config.get('default_voice', 'zh-CN-XiaoxiaoNeural'))
                 speed = params.get('speed', self.config.get('default_speed', 1.0))
-                pitch = params.get('pitch', 'default')
                 output_file = params.get('output_file')
-                result = self._tts(text, voice, speed, pitch, output_file)
+                chunk_size = params.get('chunk_size', 500)
+                auto_split = params.get('auto_split', True)
+
+                # 定义输出目录（这里添加）
+                output_dir = Path(self.config.get('output_dir', './audio_output'))
+                output_dir.mkdir(parents=True, exist_ok=True)
+    
+                # 从文件读取文本
+                if text_file and not text:
+                    text = self._read_text_file(text_file)
+                
+                if not text:
+                    raise ValueError("请提供 text 或 text_file 参数")
+                
+                # 如果文本太长，分段生成
+                chunks = self._split_text(text, chunk_size, auto_split)
+                
+                if len(chunks) > 1:
+                    logger.info(f"文本较长，分为 {len(chunks)} 段朗读")
+                    audio_paths = []
+                    for i, chunk in enumerate(chunks):
+                        logger.info(f"  生成第 {i+1}/{len(chunks)} 段...")
+                        # 为每段生成有意义的文件名
+                        seg_file = str(output_dir / self._generate_filename(
+                            chunk[:20] + f"_第{i+1}段", voice, output_dir
+                        ))
+                        result = self._tts(chunk, voice, speed, seg_file)
+                        if result.get('status') != 'success':
+                            return result
+                        audio_paths.append(result.get('audio_path'))
+                    
+                    # 合并音频（如果有 pydub）
+                    if PYDUB_AVAILABLE and len(audio_paths) > 1:
+                        merged_path = self._merge_audio(audio_paths)
+                        result = {
+                            "audio_path": merged_path,
+                            "chunks": len(chunks),
+                            "text": text[:200] + "..." if len(text) > 200 else text,
+                            "voice": voice,
+                            "speed": speed,
+                            "status": "success"
+                        }
+                    else:
+                        result = {
+                            "audio_paths": audio_paths,
+                            "chunks": len(chunks),
+                            "text": text[:200] + "..." if len(text) > 200 else text,
+                            "voice": voice,
+                            "speed": speed,
+                            "status": "success"
+                        }
+                else:
+                    result = self._tts(text, voice, speed, output_file)
             
             elif action == 'stt':
                 audio_file = params.get('audio_file')
@@ -274,7 +428,7 @@ class VoiceAssistant:
                 "skill": self.name,
                 "timestamp": datetime.now().isoformat()
             }
-    
+        
     def __repr__(self):
         return f"<VoiceAssistant(name={self.name}, version={self.version})>"
 
