@@ -75,6 +75,12 @@ class Sdimagegenerator:
         for key, value in defaults.items():
             if key not in self.config:
                 self.config[key] = value
+
+        # 如果是默认的亚洲真实模型（用户没在GUI里手动修改宽高），自动切换到竖屏
+        if (self.config.get('default_model') == 'asianrealisticSdlife_v40.safetensors'):
+            self.config['width'] = 768
+            self.config['height'] = 768
+            
     
     def _find_model(self, model_name: str) -> Optional[Path]:
         """查找模型文件"""
