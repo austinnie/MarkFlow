@@ -3,7 +3,7 @@
 技能注册中心 - 管理和注册技能
 """
 
-from typing import Dict, Type, Any, Optional
+from typing import Dict, Type, Any, Optional, List  # 添加 List 和 Type
 from pathlib import Path
 import importlib
 import importlib.util
