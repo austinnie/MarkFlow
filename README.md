@@ -17,12 +17,14 @@ MarkFlow 是一个轻量级的技能生成框架，让你用 **Markdown** 编写
 - 💻 **CLI 工具**：便捷的命令行操作，一行命令完成构建和执行
 - 📦 **模块化设计**：灵活扩展和集成，支持自定义模板
 - 📊 **代码收集**：自动收集项目代码，生成统计报告
+- 🖥️ **GUI 界面**：图形化操作界面，参数分组显示，一键执行
 
 ## 🎯 使用场景
 
 | 场景 | 示例 |
 |------|------|
 | 🎨 AI 图片生成 | 使用 Stable Diffusion 模型生成图片 |
+| 🖼️ 图片处理 | 批量压缩、格式转换、添加水印、图片查看管理 |
 | 📊 数据处理 | CSV 清洗、数据统计分析、ETL 流水线 |
 | 🌐 API 集成 | GitHub、OpenAI、天气 API 等客户端封装 |
 | 🤖 自动化任务 | 定时任务、批量处理、报告生成 |
@@ -203,8 +205,6 @@ python -m markflow.cli.commands execute SDImageGenerator prompt="a beautiful sun
 - Pillow
 ```
 
-
-
 ## 🎨 示例技能：AI 小说生成器
 
 这是 MarkFlow 的第二个实战技能，使用本地 Ollama 大模型自动写小说，支持断点续写和连载。
@@ -222,22 +222,28 @@ ollama pull qwen2.5:1.5b
 ```
 
 ### 构建技能
+
 ```bash
 python -m markflow.cli.commands build examples/novel_writer_ollama.md
 ```
 
 ### 执行技能生成小说
+
 ```bash
 # 首次生成 - 创建一部新小说
 python -m markflow.cli.commands execute NovelWriterOllama genre="科幻" title="星际行者" outline="一个普通少年意外获得星际航行能力，在宇宙中探索未知文明" characters="主角阿星，16岁，好奇心强；AI助手小智，幽默风趣" chapter_count=3 model="qwen2.5:7b"
 ```
 
 ### 断点续写
+
 ```bash
 python -m markflow.cli.commands execute NovelWriterOllama genre="科幻" title="星际行者" outline="一个普通少年意外获得星际航行能力" characters="主角阿星，16岁" chapter_count=5 model="qwen2.5:7b" continue_from="generated_novels/星际行者_20260821_xxx.txt"
 ```
 
-### 连载模式：多次运行追加新章节：
+### 连载模式
+
+多次运行追加新章节：
+
 ```bash
 # 第1次：写1-5章
 python -m markflow.cli.commands execute NovelWriterOllama genre="科幻" title="星际行者" outline="..." characters="..." chapter_count=5 model="qwen2.5:7b"
@@ -247,6 +253,58 @@ python -m markflow.cli.commands execute NovelWriterOllama genre="科幻" title="
 
 # 第3次：续写11-15章
 python -m markflow.cli.commands execute NovelWriterOllama genre="科幻" title="星际行者" outline="..." characters="..." chapter_count=15 model="qwen2.5:7b" continue_from="generated_novels/星际行者_xxx.txt"
+```
+
+## 🎨 示例技能：图片工具箱
+
+这是 MarkFlow 的第三个实战技能，支持批量图片处理。
+
+### 构建技能
+
+```bash
+python -m markflow.cli.commands build examples/image_toolbox.md
+```
+
+### 执行技能
+
+```bash
+# 批量压缩图片
+python -m markflow.cli.commands execute ImageToolbox source_dir="./images" operations="compress" quality=85
+
+# 批量调整尺寸 + 压缩
+python -m markflow.cli.commands execute ImageToolbox source_dir="./images" operations="resize,compress" width=800 quality=80
+
+# 批量添加水印
+python -m markflow.cli.commands execute ImageToolbox source_dir="./images" operations="watermark" watermark_text="© 2024" output_dir="./watermarked"
+```
+
+## 🎨 示例技能：图片查看器
+
+这是 MarkFlow 的第四个实战技能，替代 Windows 自带图片查看器。
+
+### 构建技能
+
+```bash
+python -m markflow.cli.commands build examples/image_viewer.md
+```
+
+### 执行技能
+
+```bash
+# 浏览目录
+python -m markflow.cli.commands execute ImageViewer action="browse" source_dir="./images"
+
+# 查看图片信息
+python -m markflow.cli.commands execute ImageViewer action="info" file="./images/photo.jpg"
+
+# 用系统默认程序打开图片
+python -m markflow.cli.commands execute ImageViewer action="view" file="./images/photo.jpg"
+
+# 幻灯片播放
+python -m markflow.cli.commands execute ImageViewer action="slideshow" source_dir="./images" slideshow_interval=5
+
+# 批量导出
+python -m markflow.cli.commands execute ImageViewer action="export" source_dir="./images" export_format="webp" export_quality=80
 ```
 
 ### 更多示例技能
@@ -329,6 +387,61 @@ GitHub API 客户端
 | **CLI** | 命令行交互接口 |
 | **Templates** | 内置模板管理和自定义模板支持 |
 
+## 🖥️ GUI 图形界面
+
+MarkFlow 提供了图形化操作界面，让你无需记忆命令，点击即可完成技能操作。
+
+### 启动 GUI
+
+```bash
+# 方式1：使用启动脚本
+python markflow_gui.py
+
+# 方式2：直接运行模块
+python -m markflow.gui
+```
+
+### GUI 功能
+
+| 功能 | 说明 |
+|------|------|
+| 技能列表 | 左侧显示所有已安装技能 |
+| 参数配置 | 选择技能后自动生成参数输入框 |
+| 分组折叠 | 参数按功能分组，可折叠/展开 |
+| 一键执行 | 填写参数后点击执行按钮 |
+| 日志输出 | 彩色日志显示执行过程和结果 |
+
+### GUI 界面预览
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  🚀 MarkFlow 技能管理                    v0.1.0               │
+│  [🔄刷新] [📂打开技能目录] [❓帮助]                          │
+├────────────┬────────────────────────────────────────────────────┤
+│ 📦 技能列表 │ 📋 技能信息                                      │
+│ ────────── │ ───────────────────────────────────────────────── │
+│ Sdimage... │ 📌 Sdimagegenerator                             │
+│ NovelW...  │ 使用本地 Stable Diffusion 模型生成图片           │
+│ DocGene..  │ 依赖: diffusers, torch, transformers            │
+│ ImageTo..  │ ───────────────────────────────────────────────── │
+│ ImageVi..  │ ⚙️ 参数配置                                      │
+│            │ ┌──────────────────────────────────────────────┐ │
+│            │ │ ▼ 📌 基础参数                               │ │
+│            │ │   prompt *  [________________]              │ │
+│            │ │   model_name [sd-v1-5-tiny.safetensors]    │ │
+│            │ │ ▶ 📐 尺寸参数                              │ │
+│            │ │ ▶ ⚙️ 生成参数                              │ │
+│            │ └──────────────────────────────────────────────┘ │
+│            │ [▶️ 执行技能]  [🗑️ 清空输出]                    │
+│            │ ───────────────────────────────────────────────── │
+│            │ 📋 执行日志                                      │
+│            │ [23:45:01] 🚀 执行技能: Sdimagegenerator        │
+│            │ [23:45:01] ✅ 执行成功!                         │
+├────────────┴────────────────────────────────────────────────────┤
+│  ✅ 就绪                                      📦 共 5 个技能 │
+└────────────────────────────────────────────────────────────────┘
+```
+
 ## 📂 项目结构
 
 ```
@@ -341,15 +454,24 @@ MarkFlow/
 │   │   └── executor.py          # 技能执行器
 │   ├── cli/                     # CLI 工具
 │   │   └── commands.py
+│   ├── gui/                     # 🖥️ GUI 图形界面
+│   │   ├── __init__.py
+│   │   ├── __main__.py
+│   │   └── launcher.py
 │   ├── templates/               # 模板管理
 │   │   └── base.py
 │   └── utils/                   # 工具函数
 │       └── code_collect.py
 ├── examples/                    # 示例技能
-│   └── sd_image_generator.md
+│   ├── sd_image_generator.md    # SD 图片生成
+│   ├── novel_writer_ollama.md   # AI 小说生成
+│   ├── image_toolbox.md         # 图片工具箱
+│   └── image_viewer.md          # 图片查看器
 ├── skills/                      # 生成的技能（自动创建）
 ├── collected_code/              # 代码收集输出（自动创建）
 ├── generated_images/            # 图片生成输出（自动创建）
+├── generated_novels/            # 小说生成输出（自动创建）
+├── markflow_gui.py              # 🖥️ GUI 启动脚本
 └── README.md
 ```
 
