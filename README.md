@@ -34,21 +34,8 @@ MarkFlow 是一个轻量级的技能生成框架，让你用 **Markdown** 编写
 
 ```bash
 # 克隆项目
-git clone https://github.com/yourusername/MarkFlow.git
+git clone https://github.com/austinnie/MarkFlow.git
 cd MarkFlow
-
-# 创建虚拟环境（推荐）
-python -m venv venv
-# Windows 激活虚拟环境
-venv\Scripts\activate
-# Linux/Mac 激活虚拟环境
-source venv/bin/activate
-
-# 安装依赖
-pip install -r requirements.txt
-
-# 安装为开发模式
-pip install -e .
 ```
 
 ### 创建你的第一个技能
@@ -76,13 +63,13 @@ pip install -e .
 **2. 构建技能**
 
 ```bash
-markflow build hello.md
+python -m markflow.cli.commands build hello.md
 ```
 
 **3. 执行技能**
 
 ```bash
-markflow execute HelloWorld name=MarkFlow
+python -m markflow.cli.commands execute HelloWorld name=MarkFlow
 ```
 
 输出：
@@ -101,55 +88,124 @@ markflow execute HelloWorld name=MarkFlow
 ## 📖 CLI 命令
 
 ```bash
-markflow --help
+python -m markflow.cli.commands --help
 ```
 
 | 命令 | 说明 | 示例 |
 |------|------|------|
-| `markflow build <file>` | 从 Markdown 文件构建技能 | `markflow build weather.md` |
-| `markflow execute <skill>` | 执行技能 | `markflow execute WeatherFetcher city=Beijing` |
-| `markflow list` | 列出所有已注册的技能 | `markflow list` |
-| `markflow info <skill>` | 查看技能详情 | `markflow info WeatherFetcher` |
-| `markflow generate -t <type> -n <name>` | 从模板生成技能 | `markflow generate -t data -n data_cleaner` |
-| `markflow remove <skill>` | 删除技能 | `markflow remove WeatherFetcher` |
+| `build <file>` | 从 Markdown 文件构建技能 | `build weather.md` |
+| `execute <skill>` | 执行技能 | `execute WeatherFetcher city=Beijing` |
+| `list` | 列出所有已注册的技能 | `list` |
+| `info <skill>` | 查看技能详情 | `info WeatherFetcher` |
+| `generate -t <type> -n <name>` | 从模板生成技能 | `generate -t data -n data_cleaner` |
+| `remove <skill>` | 删除技能 | `remove WeatherFetcher` |
+
+**注意**：所有命令前都需要加上 `python -m markflow.cli.commands`
 
 ### 命令示例
 
 ```bash
 # 构建技能
-markflow build examples/sd_image_generator.md
+python -m markflow.cli.commands build examples/sd_image_generator.md
 
 # 执行技能
-markflow execute SDImageGenerator prompt="beautiful sunset" model_name="sd-v1-5-tiny.safetensors"
+python -m markflow.cli.commands execute SDImageGenerator prompt="beautiful sunset" model_name="sd-v1-5-tiny.safetensors"
 
 # 列出所有技能
-markflow list
+python -m markflow.cli.commands list
 
 # 查看技能详情
-markflow info SDImageGenerator
+python -m markflow.cli.commands info SDImageGenerator
 
 # 从模板生成
-markflow generate -t data -n data_cleaner -d "数据清洗工具"
+python -m markflow.cli.commands generate -t data -n data_cleaner -d "数据清洗工具"
 
 # 删除技能
-markflow remove data_cleaner
+python -m markflow.cli.commands remove data_cleaner
 ```
 
-## 🎨 示例技能
+## 🎨 示例技能：SD 图片生成器
 
-### SD 图片生成器
+这是 MarkFlow 的第一个实战技能，使用本地 Stable Diffusion 模型生成图片。
 
-使用本地 Stable Diffusion 模型生成图片。
+### 安装依赖
 
 ```bash
-# 构建
-markflow build examples/sd_image_generator.md
-
-# 执行
-markflow execute SDImageGenerator prompt="a beautiful sunset over mountains" model_name="sd-v1-5-tiny.safetensors"
+pip install diffusers torch transformers accelerate safetensors Pillow
 ```
 
-### 数据处理技能
+### 构建技能
+
+```bash
+python -m markflow.cli.commands build examples/sd_image_generator.md
+```
+
+### 执行技能生成图片
+
+```bash
+python -m markflow.cli.commands execute SDImageGenerator prompt="a beautiful sunset over mountains" model_name="sd-v1-5-tiny.safetensors"
+```
+
+执行过程会输出详细的日志，展示每一步的执行状态：
+
+```
+2026-08-21 19:52:03,871 - Sdimagegenerator - INFO - 执行技能: SDImageGenerator (v1.0.0)
+2026-08-21 19:52:03,871 - Sdimagegenerator - INFO - 执行步骤: 验证输入参数
+2026-08-21 19:52:03,879 - Sdimagegenerator - INFO - 执行步骤: 检查模型文件是否存在
+2026-08-21 19:52:03,880 - Sdimagegenerator - INFO - 执行步骤: 加载选定的模型
+...
+✅ 执行成功!
+```
+
+生成的图片保存在 `generated_images/` 目录下。
+
+### 技能描述文件
+
+`sd_image_generator.md` 的内容如下：
+
+```markdown
+# SDImageGenerator
+
+## 描述
+使用本地 Stable Diffusion 模型生成图片的技能
+
+## 输入
+- prompt: string: 图片描述提示词 (必填)
+- negative_prompt: string: 负面提示词 (可选)
+- model_name: string: 模型文件名，默认 sd-v1-5-tiny.safetensors
+- width: integer: 图片宽度，默认 512
+- height: integer: 图片高度，默认 512
+- steps: integer: 采样步数，默认 20
+- cfg_scale: float: 引导强度，默认 7.0
+- seed: integer: 随机种子，-1 表示随机
+- batch_size: integer: 一次生成数量，默认 1
+
+## 输出
+- image_paths: 生成的图片路径列表
+- parameters: 使用的生成参数
+- generation_time: 生成耗时
+
+## 步骤
+1. 验证输入参数
+2. 检查模型文件是否存在
+3. 加载选定的模型
+4. 设置随机种子
+5. 执行图片生成
+6. 保存生成的图片
+7. 返回生成结果信息
+
+## 依赖
+- diffusers
+- torch
+- transformers
+- accelerate
+- safetensors
+- Pillow
+```
+
+### 更多示例技能
+
+**数据处理技能**：
 
 ```markdown
 # data_cleaner
@@ -176,7 +232,7 @@ CSV 数据清洗工具
 - numpy
 ```
 
-### API 客户端
+**API 客户端**：
 
 ```markdown
 # github_client
@@ -248,57 +304,8 @@ MarkFlow/
 ├── skills/                      # 生成的技能（自动创建）
 ├── collected_code/              # 代码收集输出（自动创建）
 ├── generated_images/            # 图片生成输出（自动创建）
-├── setup.py
-├── requirements.txt
 └── README.md
 ```
-
-## 🔧 开发
-
-### 安装开发依赖
-
-```bash
-pip install -e ".[dev]"
-```
-
-### 运行测试
-
-```bash
-pytest
-```
-
-### 代码格式化
-
-```bash
-black markflow/
-```
-
-### 代码检查
-
-```bash
-flake8 markflow/
-```
-
-## 📊 代码收集工具
-
-MarkFlow 内置了代码收集工具，可以自动分析项目代码：
-
-```bash
-# 收集项目所有代码文件
-python -m markflow.utils.code_collect
-
-# 指定输出目录
-python -m markflow.utils.code_collect --output my_report
-
-# 只导出 JSON 格式
-python -m markflow.utils.code_collect --format json
-```
-
-生成的报告包含：
-- 文件总数、代码行数、字符数统计
-- 按语言/扩展名分类统计
-- 最大文件排行
-- 每个文件的预览和元信息
 
 ## 🤝 贡献
 
@@ -321,7 +328,7 @@ python -m markflow.utils.code_collect --format json
 
 ## 📄 许可证
 
-本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
+本项目采用 MIT 许可证
 
 ## 🌟 支持
 
