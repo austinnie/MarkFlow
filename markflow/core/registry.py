@@ -1,9 +1,8 @@
-# markflow/core/registry.py
 """
 技能注册中心 - 管理和注册技能
 """
 
-from typing import Dict, Type, Any, Optional, List  # 添加 List 和 Type
+from typing import Dict, Type, Any, Optional, List
 from pathlib import Path
 import importlib
 import importlib.util
@@ -24,13 +23,7 @@ class SkillRegistry:
         self.storage_dir.mkdir(parents=True, exist_ok=True)
     
     def register(self, skill_class: Type, metadata: Dict = None) -> None:
-        """
-        注册技能
-        
-        Args:
-            skill_class: 技能类
-            metadata: 技能元数据
-        """
+        """注册技能"""
         name = skill_class.__name__
         self._skills[name] = skill_class
         
@@ -65,38 +58,20 @@ class SkillRegistry:
         return self._skills[name]
     
     def create_instance(self, name: str, config: Dict = None) -> Any:
-        """
-        创建技能实例
-        
-        Args:
-            name: 技能名称
-            config: 配置参数
-            
-        Returns:
-            技能实例
-        """
+        """创建技能实例"""
         skill_class = self.get(name)
         instance = skill_class(config or {})
         self._instances[name] = instance
         return instance
     
     def get_instance(self, name: str, config: Dict = None) -> Any:
-        """
-        获取或创建技能实例
-        
-        Args:
-            name: 技能名称
-            config: 配置参数
-            
-        Returns:
-            技能实例
-        """
+        """获取或创建技能实例"""
         if name in self._instances:
             return self._instances[name]
         return self.create_instance(name, config)
     
     def list(self) -> Dict[str, Dict]:
-        """列出所有已注册的技能"""
+        """列出所有已注册的技能（返回完整元数据）"""
         return {
             name: self._metadata.get(name, {})
             for name in self._skills.keys()
@@ -107,29 +82,28 @@ class SkillRegistry:
         return name in self._skills
     
     def load_from_file(self, file_path: Path) -> Optional[Type]:
-        """
-        从文件加载技能
-        
-        Args:
-            file_path: 技能文件路径
-            
-        Returns:
-            加载的技能类
-        """
+        """从文件加载技能"""
         try:
             spec = importlib.util.spec_from_file_location(file_path.stem, file_path)
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             
-            # 查找技能类
             for attr_name in dir(module):
                 attr = getattr(module, attr_name)
                 if (isinstance(attr, type) and 
                     attr.__module__ == module.__name__ and
                     attr_name != 'SkillSpec'):
-                    # 检查是否有execute方法
                     if hasattr(attr, 'execute') and callable(getattr(attr, 'execute')):
-                        self.register(attr)
+                        # 尝试从 meta.json 加载元数据
+                        meta_file = file_path.parent / f"{file_path.stem}.meta.json"
+                        metadata = None
+                        if meta_file.exists():
+                            try:
+                                with open(meta_file, 'r', encoding='utf-8') as f:
+                                    metadata = json.load(f)
+                            except:
+                                pass
+                        self.register(attr, metadata)
                         return attr
             
             logger.warning(f"未找到技能类: {file_path}")
@@ -140,15 +114,7 @@ class SkillRegistry:
             return None
     
     def load_from_directory(self, directory: Path) -> List[Type]:
-        """
-        从目录加载所有技能
-        
-        Args:
-            directory: 技能目录
-            
-        Returns:
-            加载的技能类列表
-        """
+        """从目录加载所有技能"""
         loaded = []
         for py_file in directory.glob("*.py"):
             if not py_file.name.startswith("_"):
@@ -158,23 +124,11 @@ class SkillRegistry:
         return loaded
     
     def save_to_file(self, name: str, code: str, metadata: Dict = None) -> Path:
-        """
-        保存技能到文件
-        
-        Args:
-            name: 技能名称
-            code: 技能代码
-            metadata: 元数据
-            
-        Returns:
-            保存的文件路径
-        """
-        # 保存代码
+        """保存技能到文件"""
         code_file = self.storage_dir / f"{name}.py"
         with open(code_file, 'w', encoding='utf-8') as f:
             f.write(code)
         
-        # 保存元数据
         if metadata:
             meta_file = self.storage_dir / f"{name}.meta.json"
             with open(meta_file, 'w', encoding='utf-8') as f:

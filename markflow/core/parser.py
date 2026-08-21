@@ -128,7 +128,7 @@ class MarkdownParser:
         content = re.sub(r'```.*?\n', '', content)
         content = re.sub(r'```', '', content)
         return content.strip()
-    
+        
 
     def _parse_inputs(self, content: str) -> List[Dict[str, str]]:
         """解析输入参数"""
@@ -136,26 +136,27 @@ class MarkdownParser:
         if not content:
             return inputs
         
-        # 匹配格式: - name: type: description
-        pattern = r'-\s*(\w+)\s*[:：]\s*(\w+)\s*[:：]\s*(.+)'
-        for line in content.split('\n'):
+        # 按行分割
+        lines = content.split('\n')
+        
+        # 遍历每一行
+        for line in lines:
             line = line.strip()
             if not line:
                 continue
-                
+            
+            # 匹配格式: - name: type: description
+            pattern = r'^-\s*(\w+)\s*[:：]\s*(\w+)\s*[:：]\s*(.+)'
             match = re.match(pattern, line)
             if match:
                 name = match.group(1)
                 type_str = match.group(2)
                 description = match.group(3).strip()
                 
-                # 检查是否可选 (描述中包含"可选"或"(可选)"或"optional"或"默认")
+                # 检查是否可选
                 is_optional = ('可选' in description or 
-                              '(可选)' in description or 
                               'optional' in description.lower() or
-                              '(optional)' in description.lower() or
-                              '默认' in description or
-                              'default' in description.lower())
+                              '默认' in description)
                 
                 inputs.append({
                     'name': name,
@@ -163,29 +164,25 @@ class MarkdownParser:
                     'description': description,
                     'required': not is_optional
                 })
-        
-        # 如果没匹配到，尝试其他格式
-        if not inputs:
-            # 尝试格式: - name: description (不带类型)
-            pattern2 = r'-\s*(\w+)\s*[:：]\s*(.+)'
-            for line in content.split('\n'):
-                line = line.strip()
-                if not line:
-                    continue
-                match = re.match(pattern2, line)
-                if match:
-                    name = match.group(1)
-                    description = match.group(2).strip()
-                    is_optional = ('可选' in description or 
-                                  'optional' in description.lower() or
-                                  '默认' in description or
-                                  'default' in description.lower())
-                    inputs.append({
-                        'name': name,
-                        'type': 'string',
-                        'description': description,
-                        'required': not is_optional
-                    })
+                continue
+            
+            # 匹配格式: - name: description (不带类型)
+            pattern2 = r'^-\s*(\w+)\s*[:：]\s*(.+)'
+            match = re.match(pattern2, line)
+            if match:
+                name = match.group(1)
+                description = match.group(2).strip()
+                
+                is_optional = ('可选' in description or 
+                              'optional' in description.lower() or
+                              '默认' in description)
+                
+                inputs.append({
+                    'name': name,
+                    'type': 'string',
+                    'description': description,
+                    'required': not is_optional
+                })
         
         return inputs
     
