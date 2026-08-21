@@ -1,0 +1,334 @@
+# MarkFlow
+
+> 🚀 从 Markdown 到可执行技能的工作流引擎
+
+[![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
+
+MarkFlow 是一个轻量级的技能生成框架，让你用 **Markdown** 编写技能描述，自动生成可执行的 **Python** 代码。
+
+## ✨ 特性
+
+- 📝 **Markdown 驱动**：用自然语言编写技能描述，无需编写重复的代码框架
+- 🚀 **自动生成代码**：从 Markdown 自动生成完整的 Python 可执行代码
+- 🔌 **热加载支持**：动态加载和更新技能，开发无需重启
+- 🎨 **内置模板**：基础、数据处理、API 客户端等多种模板开箱即用
+- 💻 **CLI 工具**：便捷的命令行操作，一行命令完成构建和执行
+- 📦 **模块化设计**：灵活扩展和集成，支持自定义模板
+- 📊 **代码收集**：自动收集项目代码，生成统计报告
+
+## 🎯 使用场景
+
+| 场景 | 示例 |
+|------|------|
+| 🎨 AI 图片生成 | 使用 Stable Diffusion 模型生成图片 |
+| 📊 数据处理 | CSV 清洗、数据统计分析、ETL 流水线 |
+| 🌐 API 集成 | GitHub、OpenAI、天气 API 等客户端封装 |
+| 🤖 自动化任务 | 定时任务、批量处理、报告生成 |
+| 🔧 自定义工具 | 任意 Python 功能封装为可复用技能 |
+
+## 🚀 快速开始
+
+### 安装
+
+```bash
+# 克隆项目
+git clone https://github.com/yourusername/MarkFlow.git
+cd MarkFlow
+
+# 创建虚拟环境（推荐）
+python -m venv venv
+# Windows 激活虚拟环境
+venv\Scripts\activate
+# Linux/Mac 激活虚拟环境
+source venv/bin/activate
+
+# 安装依赖
+pip install -r requirements.txt
+
+# 安装为开发模式
+pip install -e .
+```
+
+### 创建你的第一个技能
+
+**1. 编写技能描述** `hello.md`
+
+```markdown
+# hello_world
+
+## 描述
+一个简单的问候技能
+
+## 输入
+- name: string: 要问候的名字
+
+## 输出
+- greeting: 问候语
+
+## 步骤
+1. 获取名字
+2. 生成问候语
+3. 返回结果
+```
+
+**2. 构建技能**
+
+```bash
+markflow build hello.md
+```
+
+**3. 执行技能**
+
+```bash
+markflow execute HelloWorld name=MarkFlow
+```
+
+输出：
+
+```json
+{
+  "status": "success",
+  "result": {
+    "greeting": "Hello, MarkFlow!"
+  }
+}
+```
+
+就这么简单！🎉
+
+## 📖 CLI 命令
+
+```bash
+markflow --help
+```
+
+| 命令 | 说明 | 示例 |
+|------|------|------|
+| `markflow build <file>` | 从 Markdown 文件构建技能 | `markflow build weather.md` |
+| `markflow execute <skill>` | 执行技能 | `markflow execute WeatherFetcher city=Beijing` |
+| `markflow list` | 列出所有已注册的技能 | `markflow list` |
+| `markflow info <skill>` | 查看技能详情 | `markflow info WeatherFetcher` |
+| `markflow generate -t <type> -n <name>` | 从模板生成技能 | `markflow generate -t data -n data_cleaner` |
+| `markflow remove <skill>` | 删除技能 | `markflow remove WeatherFetcher` |
+
+### 命令示例
+
+```bash
+# 构建技能
+markflow build examples/sd_image_generator.md
+
+# 执行技能
+markflow execute SDImageGenerator prompt="beautiful sunset" model_name="sd-v1-5-tiny.safetensors"
+
+# 列出所有技能
+markflow list
+
+# 查看技能详情
+markflow info SDImageGenerator
+
+# 从模板生成
+markflow generate -t data -n data_cleaner -d "数据清洗工具"
+
+# 删除技能
+markflow remove data_cleaner
+```
+
+## 🎨 示例技能
+
+### SD 图片生成器
+
+使用本地 Stable Diffusion 模型生成图片。
+
+```bash
+# 构建
+markflow build examples/sd_image_generator.md
+
+# 执行
+markflow execute SDImageGenerator prompt="a beautiful sunset over mountains" model_name="sd-v1-5-tiny.safetensors"
+```
+
+### 数据处理技能
+
+```markdown
+# data_cleaner
+
+## 描述
+CSV 数据清洗工具
+
+## 输入
+- source: string: 数据源路径
+- output: string: 输出路径
+
+## 输出
+- cleaned_data: 清洗后的数据
+- report: 清洗报告
+
+## 步骤
+1. 读取数据
+2. 处理缺失值
+3. 去除重复
+4. 保存结果
+
+## 依赖
+- pandas
+- numpy
+```
+
+### API 客户端
+
+```markdown
+# github_client
+
+## 描述
+GitHub API 客户端
+
+## 输入
+- repository: string: 仓库名称
+- action: string: 操作类型 (info, stars, forks)
+
+## 输出
+- result: API 响应数据
+
+## 步骤
+1. 构建 API 请求
+2. 发送 HTTP 请求
+3. 解析响应
+4. 返回数据
+
+## 依赖
+- requests
+```
+
+## 🏗️ 架构
+
+```
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│  Markdown   │───▶│   Parser    │───▶│  Generator  │───▶│   Skill     │
+│  描述文件    │    │  解析器     │    │  代码生成器  │    │  可执行代码  │
+└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
+                                                                  │
+                                                                  ▼
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│   User      │◀───│  Executor   │◀───│  Registry   │◀───│   Skill     │
+│   用户执行   │    │  执行器     │    │  注册中心   │    │  实例化     │
+└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
+```
+
+### 核心模块说明
+
+| 模块 | 职责 |
+|------|------|
+| **Parser** | 解析 Markdown，提取技能规格（名称、参数、步骤等） |
+| **Generator** | 从规格生成完整的 Python 可执行代码 |
+| **Registry** | 管理已注册的技能，支持动态加载 |
+| **Executor** | 创建技能实例并执行 |
+| **CLI** | 命令行交互接口 |
+| **Templates** | 内置模板管理和自定义模板支持 |
+
+## 📂 项目结构
+
+```
+MarkFlow/
+├── markflow/                    # 框架核心
+│   ├── core/                    # 核心模块
+│   │   ├── parser.py            # Markdown 解析器
+│   │   ├── generator.py         # 代码生成器
+│   │   ├── registry.py          # 技能注册中心
+│   │   └── executor.py          # 技能执行器
+│   ├── cli/                     # CLI 工具
+│   │   └── commands.py
+│   ├── templates/               # 模板管理
+│   │   └── base.py
+│   └── utils/                   # 工具函数
+│       └── code_collect.py
+├── examples/                    # 示例技能
+│   └── sd_image_generator.md
+├── skills/                      # 生成的技能（自动创建）
+├── collected_code/              # 代码收集输出（自动创建）
+├── generated_images/            # 图片生成输出（自动创建）
+├── setup.py
+├── requirements.txt
+└── README.md
+```
+
+## 🔧 开发
+
+### 安装开发依赖
+
+```bash
+pip install -e ".[dev]"
+```
+
+### 运行测试
+
+```bash
+pytest
+```
+
+### 代码格式化
+
+```bash
+black markflow/
+```
+
+### 代码检查
+
+```bash
+flake8 markflow/
+```
+
+## 📊 代码收集工具
+
+MarkFlow 内置了代码收集工具，可以自动分析项目代码：
+
+```bash
+# 收集项目所有代码文件
+python -m markflow.utils.code_collect
+
+# 指定输出目录
+python -m markflow.utils.code_collect --output my_report
+
+# 只导出 JSON 格式
+python -m markflow.utils.code_collect --format json
+```
+
+生成的报告包含：
+- 文件总数、代码行数、字符数统计
+- 按语言/扩展名分类统计
+- 最大文件排行
+- 每个文件的预览和元信息
+
+## 🤝 贡献
+
+欢迎贡献！我们非常欢迎各种形式的贡献。
+
+### 贡献方式
+
+1. **报告 Bug**：在 Issues 中详细描述问题
+2. **提交代码**：通过 Pull Request 提交改进
+3. **完善文档**：改进 README 或添加示例
+4. **提出建议**：在 Issues 中讨论新功能
+
+### 开发流程
+
+1. Fork 本仓库
+2. 创建你的特性分支 (`git checkout -b feature/amazing-feature`)
+3. 提交你的修改 (`git commit -m 'Add some amazing feature'`)
+4. 推送到分支 (`git push origin feature/amazing-feature`)
+5. 开启一个 Pull Request
+
+## 📄 许可证
+
+本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
+
+## 🌟 支持
+
+如果这个项目对你有帮助，请给一个 Star ⭐️
+
+---
+
+**MarkFlow** - 让技能编写像写文档一样简单 ✨
+
+Made with ❤️ by MarkFlow Team
