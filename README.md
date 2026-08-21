@@ -203,6 +203,52 @@ python -m markflow.cli.commands execute SDImageGenerator prompt="a beautiful sun
 - Pillow
 ```
 
+
+
+## 🎨 示例技能：AI 小说生成器
+
+这是 MarkFlow 的第二个实战技能，使用本地 Ollama 大模型自动写小说，支持断点续写和连载。
+
+### 安装依赖
+
+```bash
+# 首先安装 Ollama（如果未安装）
+# 访问 https://ollama.ai 下载安装
+
+# 下载推荐模型
+ollama pull qwen2.5:7b
+# 或轻量模型（速度快）
+ollama pull qwen2.5:1.5b
+```
+
+### 构建技能
+```bash
+python -m markflow.cli.commands build examples/novel_writer_ollama.md
+```
+
+### 执行技能生成小说
+```bash
+# 首次生成 - 创建一部新小说
+python -m markflow.cli.commands execute NovelWriterOllama genre="科幻" title="星际行者" outline="一个普通少年意外获得星际航行能力，在宇宙中探索未知文明" characters="主角阿星，16岁，好奇心强；AI助手小智，幽默风趣" chapter_count=3 model="qwen2.5:7b"
+```
+
+### 断点续写
+```bash
+python -m markflow.cli.commands execute NovelWriterOllama genre="科幻" title="星际行者" outline="一个普通少年意外获得星际航行能力" characters="主角阿星，16岁" chapter_count=5 model="qwen2.5:7b" continue_from="generated_novels/星际行者_20260821_xxx.txt"
+```
+
+### 连载模式：多次运行追加新章节：
+```bash
+# 第1次：写1-5章
+python -m markflow.cli.commands execute NovelWriterOllama genre="科幻" title="星际行者" outline="..." characters="..." chapter_count=5 model="qwen2.5:7b"
+
+# 第2次：续写6-10章
+python -m markflow.cli.commands execute NovelWriterOllama genre="科幻" title="星际行者" outline="..." characters="..." chapter_count=10 model="qwen2.5:7b" continue_from="generated_novels/星际行者_xxx.txt"
+
+# 第3次：续写11-15章
+python -m markflow.cli.commands execute NovelWriterOllama genre="科幻" title="星际行者" outline="..." characters="..." chapter_count=15 model="qwen2.5:7b" continue_from="generated_novels/星际行者_xxx.txt"
+```
+
 ### 更多示例技能
 
 **数据处理技能**：
