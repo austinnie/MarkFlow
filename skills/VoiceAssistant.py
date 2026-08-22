@@ -175,13 +175,15 @@ class VoiceAssistant:
         output_dir = Path(self.config.get('output_dir', './audio_output'))
         output_dir.mkdir(parents=True, exist_ok=True)
         
-        if not output_file:
-            # 生成有意义的文件名
-            output_file = str(output_dir / self._generate_filename(text, voice, output_dir))
-        else:
+        # ✅ 修复：如果指定了 output_file，使用它；否则自动生成
+        if output_file:
             output_path = Path(output_file)
             if not output_path.parent.exists():
                 output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path = str(output_path)
+        else:
+            # 自动生成文件名
+            output_path = str(output_dir / self._generate_filename(text, voice, output_dir))
         
         try:
             import asyncio
@@ -190,12 +192,12 @@ class VoiceAssistant:
             
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(communicate.save(output_file))
+            loop.run_until_complete(communicate.save(output_path))
             
-            duration = self._get_audio_duration(output_file)
+            duration = self._get_audio_duration(output_path)
             
             return {
-                "audio_path": output_file,
+                "audio_path": output_path,
                 "duration": duration,
                 "text": text[:100] + "..." if len(text) > 100 else text,
                 "voice": voice,
@@ -206,7 +208,6 @@ class VoiceAssistant:
         except Exception as e:
             logger.error(f"TTS 失败: {e}")
             return {"error": str(e), "status": "error"}
-        
 
 
     
@@ -340,6 +341,16 @@ class VoiceAssistant:
         """使用 ffmpeg 合并多个音频文件为一个"""
         if len(audio_paths) == 1:
             return audio_paths[0]
+
+        # 如果传入了 output_path，直接使用
+        if output_path:
+            # 确保目录存在
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        else:
+            # 自动生成
+            output_dir = Path(audio_paths[0]).parent
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_path = str(output_dir / f"merged_{timestamp}.mp3")
         
         try:
             import subprocess
@@ -451,7 +462,7 @@ class VoiceAssistant:
                     audio_paths = []
                     for i, chunk in enumerate(chunks):
                         logger.info(f"  生成第 {i+1}/{len(chunks)} 段...")
-                        # 为每段生成有意义的文件名
+                        # 分段文件使用自动命名（保留用于调试）
                         seg_file = str(output_dir / self._generate_filename(
                             chunk[:20] + f"_第{i+1}段", voice, output_dir
                         ))
@@ -460,11 +471,17 @@ class VoiceAssistant:
                             return result
                         audio_paths.append(result.get('audio_path'))
                     
-                    # ✅ 合并所有分段
+                    # ✅ 修复：合并时使用 output_file
                     merged_path = None
                     if len(audio_paths) > 1:
                         logger.info(f"🔄 正在合并 {len(audio_paths)} 段音频...")
-                        merged_path = self._merge_audio(audio_paths)
+                        # 如果指定了 output_file 就用它，否则自动生成
+                        if output_file:
+                            merge_output = output_file
+                        else:
+                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            merge_output = str(output_dir / f"merged_{timestamp}.mp3")
+                        merged_path = self._merge_audio(audio_paths, merge_output)
                         if merged_path:
                             logger.info(f"✅ 合并完成: {merged_path}")
                             result = {
@@ -477,7 +494,6 @@ class VoiceAssistant:
                                 "status": "success"
                             }
                         else:
-                            # 合并失败，返回分段文件
                             result = {
                                 "audio_paths": audio_paths,
                                 "chunks": len(chunks),

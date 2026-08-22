@@ -114,6 +114,8 @@ class NovelWriterOllama:
             logger.error(f"Ollama API 调用失败: {e}")
             return ""
     
+
+
     def _load_existing_novel(self, filepath: str) -> Dict:
         """加载已有小说内容"""
         path = Path(filepath)
@@ -127,25 +129,51 @@ class NovelWriterOllama:
         title_match = re.search(r'标题：(.+)', content)
         title = title_match.group(1).strip() if title_match else None
         
-        # 解析类型
         genre_match = re.search(r'类型：(.+)', content)
         genre = genre_match.group(1).strip() if genre_match else None
         
-        # 解析总字数
         words_match = re.search(r'总字数：(\d+)', content)
         total_words = int(words_match.group(1)) if words_match else 0
         
-        # 解析各章节
+        # ✅ 修复：更灵活的章节解析
         chapters = []
-        chapter_pattern = r'第(\d+)章：(.+?)\n-{40,}\n(.*?)(?=\n-{40,}\n第\d+章：|$)'
-        matches = re.findall(chapter_pattern, content, re.DOTALL)
         
-        for match in matches:
-            chapters.append({
-                "index": int(match[0]),
-                "title": match[1].strip(),
-                "content": match[2].strip()
-            })
+        # 方法1：匹配 "第X章：标题" 后面跟着内容（可能以 "### 标题" 开头）
+        # 不要求必须有 --- 分隔线
+        parts = re.split(r'\n(?=第\d+章[：:])', content)
+        
+        for part in parts:
+            # 提取章节标题
+            title_match2 = re.search(r'第(\d+)章[：:]\s*(.+?)(?:\n|$)', part)
+            if title_match2:
+                idx = int(title_match2.group(1))
+                title_text = title_match2.group(2).strip()
+                # 移除 "### 标题" 行，但保留内容
+                content_part = re.sub(r'^###\s*.+?\n', '', part, flags=re.MULTILINE)
+                # 移除章节标题行本身
+                content_part = re.sub(r'^第\d+章[：:]\s*.+?\n', '', content_part, flags=re.MULTILINE)
+                # 移除分隔线
+                content_part = re.sub(r'^-{40,}\n', '', content_part, flags=re.MULTILINE)
+                content_part = content_part.strip()
+                
+                if content_part:
+                    chapters.append({
+                        "index": idx,
+                        "title": title_text,
+                        "content": content_part
+                    })
+        
+        # 如果上面的方法没解析到，尝试逐个匹配
+        if not chapters:
+            # 按 "第X章" 分割
+            chapter_pattern = r'第(\d+)章[：:]\s*(.+?)\n(.*?)(?=\n第\d+章[：:]|$)'
+            matches = re.findall(chapter_pattern, content, re.DOTALL)
+            for match in matches:
+                chapters.append({
+                    "index": int(match[0]),
+                    "title": match[1].strip(),
+                    "content": match[2].strip()
+                })
         
         return {
             "title": title,
@@ -154,6 +182,7 @@ class NovelWriterOllama:
             "total_words": total_words,
             "filepath": str(path)
         }
+        
     
     def _save_novel(self, result_data: Dict, is_continue: bool = False) -> str:
         """保存小说到文件"""
