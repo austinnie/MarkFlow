@@ -36,6 +36,12 @@ try:
 except ImportError:
     PYDUB_AVAILABLE = False
 
+try:
+    from mutagen.mp3 import MP3
+    from mutagen import File
+    MUTAGEN_AVAILABLE = True
+except ImportError:
+    MUTAGEN_AVAILABLE = False
 
 class VoiceAssistant:
     """语音合成和识别助手"""
@@ -201,16 +207,19 @@ class VoiceAssistant:
             logger.error(f"TTS 失败: {e}")
             return {"error": str(e), "status": "error"}
         
-  
+
+
+    
     def _get_audio_duration(self, audio_path: str) -> float:
         """获取音频时长（秒）"""
-        if not PYDUB_AVAILABLE:
-            return 0.0
-        try:
-            audio = AudioSegment.from_file(audio_path)
-            return len(audio) / 1000.0
-        except:
-            return 0.0
+        if MUTAGEN_AVAILABLE:
+            try:
+                audio = File(audio_path)
+                if audio:
+                    return audio.info.length
+            except:
+                pass
+        return 0.0
     
     def _stt(self, audio_file: str, language: str = None) -> Dict:
         """语音转文字"""
@@ -327,6 +336,81 @@ class VoiceAssistant:
         return chunks
     
 
+    def _merge_audio(self, audio_paths: List[str], output_path: str = None) -> str:
+        """使用 ffmpeg 合并多个音频文件为一个"""
+        if len(audio_paths) == 1:
+            return audio_paths[0]
+        
+        try:
+            import subprocess
+            
+            # 检查 ffmpeg 是否可用
+            result = subprocess.run(['ffmpeg', '-version'], capture_output=True, timeout=5)
+            if result.returncode != 0:
+                logger.warning("ffmpeg 未安装，无法合并音频")
+                return None
+            
+            if not output_path:
+                output_dir = Path(audio_paths[0]).parent
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                output_path = str(output_dir / f"merged_{timestamp}.mp3")
+            
+            # 创建 ffmpeg 需要的文件列表
+            list_file = Path(audio_paths[0]).parent / "merge_list.txt"
+            with open(list_file, 'w', encoding='utf-8') as f:
+                for path in audio_paths:
+                    # ffmpeg concat 需要绝对路径
+                    abs_path = str(Path(path).absolute())
+                    f.write(f"file '{abs_path}'\n")
+            
+            # 执行 ffmpeg 合并
+            cmd = [
+                'ffmpeg', '-f', 'concat', '-safe', '0',
+                '-i', str(list_file),
+                '-c', 'copy',
+                str(output_path)
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, timeout=60)
+            
+            # 清理临时文件
+            if list_file.exists():
+                list_file.unlink()
+            
+            if result.returncode == 0 and Path(output_path).exists():
+                return output_path
+            else:
+                logger.error(f"ffmpeg 合并失败: {result.stderr.decode() if result.stderr else '未知错误'}")
+                return None
+                
+        except subprocess.TimeoutExpired:
+            logger.error("ffmpeg 合并超时")
+            return None
+        except Exception as e:
+            logger.error(f"合并音频失败: {e}")
+            return None
+        
+
+    def _ensure_ffmpeg(self):
+        """确保 ffmpeg 可用"""
+        import subprocess
+        import sys
+        
+        try:
+            # 检查 ffmpeg 是否可用
+            subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True)
+            return True
+        except:
+            logger.warning("ffmpeg 未安装，尝试自动安装...")
+            try:
+                # 使用 pip 安装 ffmpeg-python
+                subprocess.run([sys.executable, '-m', 'pip', 'install', 'ffmpeg-python'], 
+                              capture_output=True, check=True)
+                return True
+            except:
+                logger.error("ffmpeg 安装失败，请手动安装")
+                return False
+            
     def execute(self, **kwargs) -> Dict[str, Any]:
         """执行操作"""
         start_time = time.time()
@@ -376,20 +460,36 @@ class VoiceAssistant:
                             return result
                         audio_paths.append(result.get('audio_path'))
                     
-                    # 合并音频（如果有 pydub）
-                    if PYDUB_AVAILABLE and len(audio_paths) > 1:
+                    # ✅ 合并所有分段
+                    merged_path = None
+                    if len(audio_paths) > 1:
+                        logger.info(f"🔄 正在合并 {len(audio_paths)} 段音频...")
                         merged_path = self._merge_audio(audio_paths)
-                        result = {
-                            "audio_path": merged_path,
-                            "chunks": len(chunks),
-                            "text": text[:200] + "..." if len(text) > 200 else text,
-                            "voice": voice,
-                            "speed": speed,
-                            "status": "success"
-                        }
+                        if merged_path:
+                            logger.info(f"✅ 合并完成: {merged_path}")
+                            result = {
+                                "audio_path": merged_path,
+                                "chunks": len(chunks),
+                                "segment_files": audio_paths,
+                                "text": text[:200] + "..." if len(text) > 200 else text,
+                                "voice": voice,
+                                "speed": speed,
+                                "status": "success"
+                            }
+                        else:
+                            # 合并失败，返回分段文件
+                            result = {
+                                "audio_paths": audio_paths,
+                                "chunks": len(chunks),
+                                "text": text[:200] + "..." if len(text) > 200 else text,
+                                "voice": voice,
+                                "speed": speed,
+                                "status": "success",
+                                "warning": "合并失败，返回分段文件"
+                            }
                     else:
                         result = {
-                            "audio_paths": audio_paths,
+                            "audio_path": audio_paths[0] if audio_paths else None,
                             "chunks": len(chunks),
                             "text": text[:200] + "..." if len(text) > 200 else text,
                             "voice": voice,
