@@ -218,6 +218,9 @@ class MarkFlowLauncher:
         """加载技能列表"""
         self.skill_listbox.delete(0, tk.END)
         
+        # ✅ 强制清除缓存
+        self.executor.registry.clear()
+        
         # 重新加载技能
         if self.skill_dir.exists():
             self.executor.registry.load_from_directory(self.skill_dir)

@@ -84,32 +84,58 @@ class Sdimagegenerator:
     
     def _find_model(self, model_name: str) -> Optional[Path]:
         """查找模型文件"""
+        import os
+        
         if not model_name:
             model_name = self.config.get('default_model', 'sd-v1-5-tiny.safetensors')
         
-        # 直接查找
-        direct_path = self.models_dir / model_name
-        if direct_path.exists():
-            return direct_path
+        # ✅ 调试：打印传入的模型名
+        logger.info(f"🔍 查找模型: '{model_name}'")
+        logger.info(f"📁 模型目录: {self.models_dir}")
         
-        # 在子目录中查找
+        # 1. 直接查找
+        direct_path = self.models_dir / model_name
+        logger.info(f"  1️⃣ 直接查找: {direct_path}")
+        if direct_path.exists():
+            logger.info(f"  ✅ 找到: {direct_path}")
+            return direct_path
+        logger.info(f"  ❌ 不存在")
+        
+        # 2. 提取文件名
+        filename = os.path.basename(model_name)
+        logger.info(f"  2️⃣ 提取文件名: '{filename}'")
+        
+        # 3. 在子目录中查找文件名
         subdirs = ['sd-v1-5', 'sdxl', 'sd15-lora', 'sdxl-lora']
         for subdir in subdirs:
-            sub_path = self.models_dir / subdir / model_name
+            sub_path = self.models_dir / subdir / filename
+            logger.info(f"    检查: {sub_path}")
             if sub_path.exists():
+                logger.info(f"  ✅ 找到: {sub_path}")
                 return sub_path
         
-        # 尝试带扩展名
+        # 4. 遍历所有子目录
+        logger.info("  4️⃣ 遍历所有子目录...")
+        for subdir in self.models_dir.iterdir():
+            if subdir.is_dir():
+                file_path = subdir / filename
+                logger.info(f"    检查: {file_path}")
+                if file_path.exists():
+                    logger.info(f"  ✅ 找到: {file_path}")
+                    return file_path
+        
+        # 5. 尝试各种扩展名
         for ext in ['.safetensors', '.ckpt', '.pth']:
-            if not model_name.endswith(ext):
-                test_path = self.models_dir / f"{model_name}{ext}"
-                if test_path.exists():
-                    return test_path
+            if not filename.endswith(ext):
+                test_name = filename + ext
+                logger.info(f"  5️⃣ 尝试扩展名: '{test_name}'")
                 for subdir in subdirs:
-                    test_path = self.models_dir / subdir / f"{model_name}{ext}"
+                    test_path = self.models_dir / subdir / test_name
                     if test_path.exists():
+                        logger.info(f"  ✅ 找到: {test_path}")
                         return test_path
         
+        logger.error(f"❌ 未找到模型: '{model_name}'")
         return None
     
     def _load_model(self, model_name: str) -> bool:
@@ -117,6 +143,8 @@ class Sdimagegenerator:
         if not DIFFUSERS_AVAILABLE:
             logger.error("diffusers 未安装，请运行: pip install diffusers torch transformers accelerate safetensors Pillow")
             return False
+        
+        logger.info(f"🔍 _load_model 接收到的 model_name: '{model_name}'")
         
         model_path = self._find_model(model_name)
         if not model_path:
@@ -206,7 +234,7 @@ class Sdimagegenerator:
             height = kwargs.get('height', self.config.get('height', 512))
             steps = kwargs.get('steps', self.config.get('steps', 20))
             cfg_scale = kwargs.get('cfg_scale', self.config.get('cfg_scale', 7.0))
-            seed = kwargs.get('seed', -1)
+
             output_dir = kwargs.get('output_dir', self.config.get('output_dir', './generated_images'))
             batch_size = kwargs.get('batch_size', 1)
             
@@ -223,6 +251,15 @@ class Sdimagegenerator:
                     }
             
             # 4. 设置随机种子
+            seed = kwargs.get('seed', -1)
+
+            # ✅ 如果 seed 是字符串，转为整数
+            if isinstance(seed, str):
+                try:
+                    seed = int(seed)
+                except:
+                    seed = -1
+        
             if seed == -1:
                 seed = random.randint(0, 2**32 - 1)
             generator = torch.Generator(device=self.device).manual_seed(seed)

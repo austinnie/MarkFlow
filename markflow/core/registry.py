@@ -83,6 +83,13 @@ class SkillRegistry:
     
     def load_from_file(self, file_path: Path) -> Optional[Type]:
         """从文件加载技能"""
+
+        # ✅ 强制重新加载，不使用缓存
+        # 先注销已存在的同名技能
+        module_name = file_path.stem
+        if module_name in self._skills:
+            self.unregister(module_name)
+        
         try:
             spec = importlib.util.spec_from_file_location(file_path.stem, file_path)
             module = importlib.util.module_from_spec(spec)
