@@ -1,4 +1,3 @@
-# scripts/novel_generator.py
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
@@ -27,7 +26,7 @@ class NovelGenerator:
     def __init__(self):
         self.base_dir = Path(__file__).parent.parent
         
-        # ✅ 更新输出路径到技能目录
+        # ✅ 输出路径到技能目录
         self.novel_dir = self.base_dir / "skills" / "novel_writer" / "output" / "novels"
         self.audio_dir = self.base_dir / "skills" / "voice_assistant" / "output" / "audio"
         self.novel_dir.mkdir(parents=True, exist_ok=True)
@@ -46,7 +45,6 @@ class NovelGenerator:
         try:
             with open(novel_file, 'r', encoding='utf-8') as f:
                 content = f.read()
-            # 统计 "第X章" 的数量
             chapters = re.findall(r'第\d+章', content)
             return len(chapters)
         except:
@@ -56,7 +54,7 @@ class NovelGenerator:
         """获取当前使用的小说文件"""
         today = self.get_today()
         
-        # ✅ 先查找新目录
+        # 先查找新目录
         zh_file = self.novel_dir / f"novel_zh_{today}.txt"
         if zh_file.exists():
             return zh_file
@@ -66,15 +64,8 @@ class NovelGenerator:
         if star_files:
             return sorted(star_files)[-1]
         
-        # 兼容旧的 generated_novels 目录
-        old_novel_dir = self.base_dir / "generated_novels"
-        if old_novel_dir.exists():
-            old_files = list(old_novel_dir.glob("星际行者*.txt"))
-            if old_files:
-                return sorted(old_files)[-1]
-        
         return None
-    
+
     def continue_novel(self, novel_file: Path, target_chapters: int) -> bool:
         """续写小说到目标章节数"""
         current = self.get_current_chapters(novel_file)
@@ -86,7 +77,6 @@ class NovelGenerator:
         print(f"📝 从 {current} 章续写到 {target_chapters} 章（+{target_chapters - current} 章）")
         
         try:
-            # ✅ 调用 novel_writer 技能
             result = execute_skill(
                 "novel_writer",
                 genre="科幻",
@@ -108,17 +98,14 @@ class NovelGenerator:
         """生成有声书"""
         print("[2/2] 正在生成有声书...")
         
-        # 确定输出文件名
         today = self.get_today()
         if text_file:
-            # 使用小说文件名生成音频文件名
             base_name = text_file.stem
             audio_file = self.audio_dir / f"{base_name}.mp3"
         else:
             audio_file = self.audio_dir / f"novel_zh_{today}.mp3"
         
         try:
-            # ✅ 调用 voice_assistant 技能
             result = execute_skill(
                 "voice_assistant",
                 action="tts",
@@ -150,12 +137,10 @@ class NovelGenerator:
         print(f"📅 时间：{self.get_today_display()}")
         print()
 
-        # 获取今天的小说文件
         novel_file = self.get_novel_file()
         
-        # 如果今天的文件不存在，从旧文件复制
+        # 如果今天的文件不存在，从旧文件复制或首次生成
         if novel_file is None or not novel_file.exists():
-            # 查找最近的小说文件作为源
             old_files = list(self.novel_dir.glob("novel_zh_*.txt"))
             if old_files:
                 source = sorted(old_files)[-1]
@@ -164,7 +149,6 @@ class NovelGenerator:
                 shutil.copy2(source, novel_file)
                 print(f"📂 从 {source} 复制到 {novel_file}")
             else:
-                # 首次生成 3 章
                 print("📝 首次生成 3 章...")
                 try:
                     result = execute_skill(
@@ -191,21 +175,16 @@ class NovelGenerator:
             print("❌ 未找到小说文件")
             return
         
-        # 计算目标章节数
         current = self.get_current_chapters(novel_file)
         if target_chapters is None:
-            # 默认每天 +3 章
             target_chapters = current + 3
         
-        # 续写
         print(f"📖 当前：{current} 章 → 目标：{target_chapters} 章")
         if not self.continue_novel(novel_file, target_chapters):
             return
 
-        # 生成有声书
         self.generate_audiobook(novel_file)
 
-        # 显示最终结果
         final_chapters = self.get_current_chapters(novel_file)
         print("\n" + "=" * 60)
         print("   ✅ 完成！")

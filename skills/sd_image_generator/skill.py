@@ -63,14 +63,15 @@ class Sdimagegenerator:
         )
     
     def _setup_config(self):
-        """设置配置"""
         defaults = {
+            'output_dir': './skills/sd_image_generator/output/images',  # ✅ 改为新路径
             'default_model': 'sd-v1-5-tiny.safetensors',
-            'output_dir': './generated_images',
-            'width': 512,
-            'height': 512,
-            'steps': 20,
-            'cfg_scale': 7.0,
+            'default_width': 512,
+            'default_height': 512,
+            'default_steps': 20,
+            'default_cfg_scale': 7.0,
+            'default_seed': -1,
+            'default_batch_size': 1,
         }
         for key, value in defaults.items():
             if key not in self.config:
@@ -235,7 +236,10 @@ class Sdimagegenerator:
             steps = kwargs.get('steps', self.config.get('steps', 20))
             cfg_scale = kwargs.get('cfg_scale', self.config.get('cfg_scale', 7.0))
 
-            output_dir = kwargs.get('output_dir', self.config.get('output_dir', './generated_images'))
+            output_dir = kwargs.get('output_dir', self.config.get('output_dir', './skills/sd_image_generator/output/images'))
+            output_dir = Path(output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
             batch_size = kwargs.get('batch_size', 1)
             
             # 确保宽高是8的倍数

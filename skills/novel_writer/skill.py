@@ -48,7 +48,7 @@ class NovelWriterOllama:
             'default_temperature': 0.85,
             'default_chapter_count': 3,
             'default_words_per_chapter': 500,
-            'output_dir': './generated_novels'
+            'output_dir': './skills/novel_writer/output/novels', 
         }
         for key, value in defaults.items():
             if key not in self.config:

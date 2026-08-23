@@ -3,28 +3,32 @@
 """
 SD 图片批量生成器 - 安全优雅版
 用法：
-  python generate_images.py           # 生成所有方案
-  python generate_images.py --list    # 列出所有方案
-  python generate_images.py --id 1    # 只生成第 1 组
-  python generate_images.py --ids 1,3,5  # 生成指定的组
+  python generate_all_girls.py           # 生成所有方案
+  python generate_all_girls.py --list    # 列出所有方案
+  python generate_all_girls.py --id 1    # 只生成第 1 组
+  python generate_all_girls.py --ids 1,3,5  # 生成指定的组
 """
 
 import sys
-import subprocess
 import argparse
 import time
 from datetime import datetime
 from pathlib import Path
 
+# 添加项目根目录到 sys.path
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+from markflow.cli.commands import execute_skill
+
 
 class SDImageGenerator:
     def __init__(self):
         self.base_dir = Path(__file__).parent.parent
-        # ✅ 改为指向技能的输出目录
         self.output_dir = self.base_dir / "skills" / "sd_image_generator" / "output" / "images"
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        # ✅ 所有方案配置 - 安全优雅版
         self.schemes = [
             {
                 "id": 1,
@@ -209,26 +213,11 @@ class SDImageGenerator:
             }
         ]
 
-    def run_command(self, cmd):
-        try:
-            result = subprocess.run(cmd, text=True, encoding='utf-8', errors='replace')
-            return result.returncode == 0
-        except Exception as e:
-            print(f"❌ 执行异常: {e}")
-            return False
-
-    # scripts/generate_all_girls.py 的 generate_one 方法
-
     def generate_one(self, scheme):
-        """生成单张图片 - 直接调用"""
+        """生成单张图片 - 直接调用 execute_skill"""
         print(f"\n{'='*60}")
         print(f"   [{scheme['id']}/15] {scheme['name']}")
         print('='*60)
-
-        import sys
-        from pathlib import Path
-        sys.path.insert(0, str(Path(__file__).parent.parent))
-        from markflow.cli.commands import execute_skill
 
         seed = scheme.get('seed', -1)
         if isinstance(seed, str):
@@ -254,7 +243,7 @@ class SDImageGenerator:
         except Exception as e:
             print(f"❌ 执行失败: {e}")
             return False
-        
+
     def list_schemes(self):
         """列出所有方案"""
         print("\n" + "="*60)
@@ -306,10 +295,10 @@ def main():
     parser = argparse.ArgumentParser(
         description="SD 图片批量生成器 - 安全优雅版",
         epilog="示例：\n"
-               "  python generate_images.py              # 生成所有方案\n"
-               "  python generate_images.py --list       # 列出所有方案\n"
-               "  python generate_images.py --id 1       # 生成第 1 组\n"
-               "  python generate_images.py --ids 1,3,5  # 生成指定组"
+               "  python generate_all_girls.py              # 生成所有方案\n"
+               "  python generate_all_girls.py --list       # 列出所有方案\n"
+               "  python generate_all_girls.py --id 1       # 生成第 1 组\n"
+               "  python generate_all_girls.py --ids 1,3,5  # 生成指定组"
     )
     parser.add_argument("--list", action="store_true", help="列出所有方案")
     parser.add_argument("--id", type=int, help="生成指定 ID 的方案")

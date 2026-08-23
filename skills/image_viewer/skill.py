@@ -193,7 +193,7 @@ class ImageViewer:
             with Image.open(file_path) as img:
                 img.thumbnail((size, size), Image.Resampling.LANCZOS)
                 # 保存到临时目录
-                temp_dir = Path('./.thumbnails')
+                temp_dir = Path('./skills/image_viewer/output/.thumbnails') 
                 temp_dir.mkdir(exist_ok=True)
                 thumb_path = temp_dir / f"{file_path.stem}_{size}.jpg"
                 img.save(thumb_path, 'JPEG', quality=85)

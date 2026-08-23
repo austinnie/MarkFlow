@@ -1,4 +1,3 @@
-# scripts/novel_scheduler.py
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
@@ -35,7 +34,7 @@ class NovelScheduler:
         self.log("📖 开始执行每日小说生成任务")
         
         try:
-            # ✅ 使用正确的脚本路径
+            # ✅ 直接调用 novel_generator.py 脚本
             cmd = ["python", str(self.base_dir / "scripts" / "novel_generator.py"), "3"]
             result = subprocess.run(
                 cmd, 

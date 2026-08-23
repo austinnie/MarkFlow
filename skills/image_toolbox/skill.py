@@ -92,7 +92,7 @@ class ImageToolbox:
     
     def _setup_config(self):
         defaults = {
-            'output_dir': './processed_images',
+            'output_dir': './skills/image_toolbox/output',
             'default_quality': 85,
             'default_format': 'jpg',
             'max_image_size': 4096,

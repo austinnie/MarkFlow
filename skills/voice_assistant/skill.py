@@ -83,7 +83,7 @@ class VoiceAssistant:
     
     def _setup_config(self):
         defaults = {
-            'output_dir': './audio_output',
+            'output_dir': './skills/voice_assistant/output/audio', 
             'default_voice': 'zh-CN-XiaoxiaoNeural',
             'default_speed': 1.0,
             'default_language': 'zh-CN',
