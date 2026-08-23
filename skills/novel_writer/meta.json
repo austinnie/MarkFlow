@@ -99,5 +99,6 @@
       "description": "生成时间"
     }
   ],
-  "config": {}
+  "config": {},
+  "class_name": "NovelWriterOllama"
 }

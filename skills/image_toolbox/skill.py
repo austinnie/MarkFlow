@@ -642,3 +642,6 @@ class ImageToolbox:
     
     def __repr__(self):
         return f"<ImageToolbox(name={self.name}, version={self.version})>"
+
+# 兼容旧导入
+Imagetoolbox = ImageToolbox

@@ -80,7 +80,17 @@ def main():
     if args.command == "build":
         build_skill(args, executor, console)
     elif args.command == "execute":
-        execute_skill(args, executor, console)
+        # 获取技能名称
+        skill_name = getattr(args, 'skill', None)
+        if not skill_name:
+            console.print("[red]❌ 请指定技能名称[/red]")
+            return
+        
+        # 提取参数
+        kwargs = {k: v for k, v in vars(args).items() 
+                  if k not in ['command', 'skill', 'func'] and v is not None}
+        
+        execute_skill(skill_name, **kwargs)
     elif args.command == "list":
         list_skills(executor, console)
     elif args.command == "info":
@@ -127,50 +137,59 @@ def build_skill(args, executor, console):
         sys.exit(1)
 
 
-def execute_skill(args, executor, console):
+# markflow/cli/commands.py
+# 找到 execute 命令部分，更新技能加载逻辑
+
+# 找到类似这样的代码：
+def execute_skill(skill_name, **kwargs):
     """执行技能"""
-    params = {}
-    for param in args.params:
-        if '=' in param:
-            key, value = param.split('=', 1)
-            try:
-                if value.lower() == 'true':
-                    value = True
-                elif value.lower() == 'false':
-                    value = False
-                elif value.isdigit():
-                    value = int(value)
-                elif value.replace('.', '').isdigit():
-                    value = float(value)
-                elif value.startswith('{') or value.startswith('['):
-                    value = json.loads(value)
-            except:
-                pass
-            params[key] = value
+    import importlib
+    import sys
+    from pathlib import Path
+    
+    # 确保项目根目录在 sys.path 中
+    project_root = Path(__file__).parent.parent.parent
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
     
     try:
-        skill_dir = Path("./skills")
-        if skill_dir.exists():
-            executor.registry.load_from_directory(skill_dir)
+        # 尝试从新的 skills 目录导入
+        module = importlib.import_module(f"skills.{skill_name}.skill")
         
-        result = executor.execute(args.skill, **params)
+        # 查找技能类
+        skill_class = None
+        for attr_name in dir(module):
+            if attr_name.endswith("Generator") or \
+               attr_name.endswith("Assistant") or \
+               attr_name.endswith("Toolbox") or \
+               attr_name.endswith("Viewer"):
+                skill_class = getattr(module, attr_name)
+                break
         
-        if result.get('status') == 'success':
-            console.print("\n[bold green]✅ 执行成功![/bold green]")
-            console.print("  技能: [cyan]{}[/cyan]".format(args.skill))
-            if 'metadata' in result:
-                console.print("  版本: [cyan]{}[/cyan]".format(result['metadata'].get('version', '1.0.0')))
-                console.print("  时间: [cyan]{}[/cyan]".format(result['metadata'].get('executed_at', '')))
-            
-            console.print("\n[bold]结果:[/bold]")
-            console.print(json.dumps(result.get('result', {}), ensure_ascii=False, indent=2))
+        if not skill_class:
+            print(f"❌ 未找到技能类: {skill_name}")
+            return False
+        
+        # 创建实例并执行
+        skill = skill_class()
+        
+        # 如果 skill 有 execute 方法
+        if hasattr(skill, 'execute'):
+            result = skill.execute(**kwargs)
+            print(f"✅ 执行成功")
+            return result
         else:
-            console.print("\n[red]❌ 执行失败: {}[/red]".format(result.get('error', '未知错误')))
+            print(f"❌ 技能 {skill_name} 没有 execute 方法")
+            return False
             
+    except ImportError as e:
+        print(f"❌ 导入失败: {e}")
+        return False
     except Exception as e:
-        console.print("[red]❌ 执行失败: {}[/red]".format(e))
-        sys.exit(1)
-
+        print(f"❌ 执行失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return False    
 
 def list_skills(executor, console):
     """列出所有技能"""

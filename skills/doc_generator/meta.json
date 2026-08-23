@@ -98,5 +98,6 @@
       "description": "使用示例"
     }
   ],
-  "config": {}
+  "config": {},
+  "class_name": "DocGenerator"
 }

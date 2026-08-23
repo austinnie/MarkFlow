@@ -176,5 +176,6 @@
       "description": "处理耗时"
     }
   ],
-  "config": {}
+  "config": {},
+  "class_name": "ImageToolbox"
 }
