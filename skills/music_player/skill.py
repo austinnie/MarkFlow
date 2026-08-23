@@ -95,7 +95,7 @@ class MusicPlayer:
     def _setup_config(self):
         defaults = {
             "output_dir": "./skills/music_player/output",
-            "music_dir": "./skills/music_player/music",
+            "music_dir": "./skills/music_player/output",  # ← 直接指向 output
             "playlist_dir": "./skills/music_player/playlists",
             "default_volume": 0.7,
             "max_search_results": 20,
@@ -105,8 +105,9 @@ class MusicPlayer:
                 self.config[key] = value
         
         # 创建必要的目录
-        for key in ["output_dir", "music_dir", "playlist_dir"]:
+        for key in ["output_dir", "playlist_dir"]:
             Path(self.config[key]).mkdir(parents=True, exist_ok=True)
+        # music_dir 和 output_dir 是同一个目录，不需要重复创建
     
     def _init_player(self):
         """初始化播放器"""
@@ -133,7 +134,7 @@ class MusicPlayer:
         
         action = kwargs["action"]
         valid_actions = ["play", "search", "playlist", "lyrics", "pause", "resume", 
-                        "stop", "next", "previous", "volume", "info", "scan"]
+                "stop", "next", "previous", "volume", "info", "scan", "download"]
         if action not in valid_actions:
             raise ValueError(f"不支持的操作: {action}，支持: {valid_actions}")
         
@@ -197,11 +198,22 @@ class MusicPlayer:
         """在本地音乐中搜索"""
         results = []
         query_lower = query.lower()
+        logger.info(f"搜索本地: query='{query_lower}', 本地歌曲数={len(tracks)}")
+        
         for track in tracks:
-            if (query_lower in track["title"].lower() or 
-                query_lower in track["artist"].lower() or
-                query_lower in track["album"].lower()):
+            title_lower = track["title"].lower()
+            artist_lower = track["artist"].lower()
+            album_lower = track["album"].lower()
+            
+            logger.info(f"  检查: '{title_lower}' 包含 '{query_lower}'? {query_lower in title_lower}")
+            
+            if (query_lower in title_lower or 
+                query_lower in artist_lower or
+                query_lower in album_lower):
                 results.append(track)
+                logger.info(f"  ✅ 匹配: {track['title']}")
+        
+        logger.info(f"本地搜索找到 {len(results)} 个结果")
         return results
     
     def _search_online(self, query: str, limit: int = 10) -> List[Dict]:
@@ -619,7 +631,81 @@ Outro:
             "playlist_size": len(self.current_playlist),
             "volume": self.volume,
         }
-    
+
+
+    def _download(self, query: str, output_dir: str = None, format: str = "mp3") -> Dict:
+        """下载音乐（使用 yt-dlp）"""
+        if not YT_DLP_AVAILABLE:
+            return {"error": "yt-dlp 未安装", "status": "error"}
+        
+        output_dir = output_dir or self.config.get("output_dir", "./skills/music_player/output/downloads")
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        
+        try:
+            import yt_dlp
+            
+            # 先搜索找到视频 URL
+            search_query = f'ytsearch1:{query}'
+            ydl_opts_search = {
+                'quiet': True,
+                'extract_flat': False,  # ✅ 改为 False 获取完整信息
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts_search) as ydl:
+                info = ydl.extract_info(search_query, download=False)
+                if not info or not info.get('entries'):
+                    return {"error": f"未找到: {query}", "status": "error"}
+                entry = info['entries'][0]
+                
+                # ✅ 获取 URL 的多种方式
+                url = entry.get('webpage_url')
+                if not url:
+                    url = entry.get('original_url')
+                if not url:
+                    url = entry.get('url')
+                if not url:
+                    return {"error": "无法获取视频链接", "status": "error"}
+                
+                title = entry.get('title', '未知歌曲')
+                uploader = entry.get('uploader', '未知艺术家')
+            
+            # 下载音频
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': format,
+                    'preferredquality': '192',
+                }],
+                'outtmpl': str(Path(output_dir) / f'%(title)s.%(ext)s'),
+                'quiet': True,
+                'no_warnings': True,
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+            
+            # 查找下载的文件
+            downloaded_files = list(Path(output_dir).glob(f"*{title}*.{format}"))
+            if not downloaded_files:
+                downloaded_files = list(Path(output_dir).glob(f"*{title}*"))
+            
+            return {
+                "status": "success",
+                "title": title,
+                "artist": uploader,
+                "url": url,
+                "format": format,
+                "output_dir": str(output_dir),
+                "files": [str(f) for f in downloaded_files],
+                "message": f"已下载: {title} - {uploader}"
+            }
+            
+        except Exception as e:
+            logger.error(f"下载失败: {e}")
+            return {"error": str(e), "status": "error"}
+            
+ 
     def execute(self, **kwargs) -> Dict[str, Any]:
         """执行音乐播放操作"""
         start_time = time.time()
@@ -637,7 +723,6 @@ Outro:
             result = {}
             
             if action == "search":
-                # 搜索音乐
                 query = query or kwargs.get("query", "")
                 if not query:
                     return {"status": "error", "error": "搜索需要 query 参数"}
@@ -646,15 +731,24 @@ Outro:
                 local_tracks = self._scan_music()
                 local_results = self._search_local(query, local_tracks)
                 
-                # 再搜索在线
-                online_results = self._search_online(query, 10)
-                
-                result = {
-                    "local": local_results[:10],
-                    "online": online_results[:10],
-                    "total_local": len(local_results),
-                    "total_online": len(online_results),
-                }
+                # 如果有本地结果，直接返回，不搜在线
+                if local_results:
+                    result = {
+                        "local": local_results[:10],
+                        "total_local": len(local_results),
+                        "total_online": 0,
+                        "source": "local"
+                    }
+                else:
+                    # 本地没有，搜索在线
+                    online_results = self._search_online(query, 10)
+                    result = {
+                        "local": [],
+                        "online": online_results[:10],
+                        "total_local": 0,
+                        "total_online": len(online_results),
+                        "source": "online"
+                    }
             
             elif action == "playlist":
                 # 生成播放列表
@@ -697,14 +791,23 @@ Outro:
                 url = kwargs.get("url", "")
                 
                 if query and not url:
-                    # 根据歌名搜索并播放第一个结果
-                    results = self._search_online(query, 1)
-                    if results:
-                        track = results[0]
+                    # 先搜索本地
+                    local_tracks = self._scan_music()
+                    local_results = self._search_local(query, local_tracks)
+                    
+                    if local_results:
+                        track = local_results[0]
                         result = self._play(track)
                     else:
-                        return {"status": "error", "error": f"未找到歌曲: {query}"}
+                        # 本地没有，搜索在线
+                        results = self._search_online(query, 1)
+                        if results:
+                            track = results[0]
+                            result = self._play(track)
+                        else:
+                            return {"status": "error", "error": f"未找到歌曲: {query}"}
                 elif url:
+
                     # 直接播放 URL
                     track = {
                         "title": kwargs.get("title", "在线歌曲"),
@@ -759,7 +862,16 @@ Outro:
                     "tracks": tracks[:20],  # 只返回前20首
                     "status": "success",
                 }
-            
+
+            elif action == "download":
+                query = kwargs.get("query", "")
+                if not query:
+                    return {"status": "error", "error": "下载需要 query 参数"}
+                
+                format = kwargs.get("format", "mp3")
+                output_dir = kwargs.get("output_dir", None)
+                result = self._download(query, output_dir, format)
+                
             else:
                 return {"status": "error", "error": f"未知操作: {action}"}
             
