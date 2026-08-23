@@ -1,3 +1,4 @@
+# scripts/novel_scheduler.py
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
@@ -14,7 +15,7 @@ from pathlib import Path
 
 class NovelScheduler:
     def __init__(self):
-        self.base_dir = Path(__file__).parent
+        self.base_dir = Path(__file__).parent.parent
         self.log_dir = self.base_dir / "logs"
         self.log_dir.mkdir(exist_ok=True)
 
@@ -34,13 +35,13 @@ class NovelScheduler:
         self.log("📖 开始执行每日小说生成任务")
         
         try:
-            # ✅ 修复：不捕获输出，直接显示在终端，避免编码问题
-            cmd = ["python", "novel_generator.py", "3"]
+            # ✅ 使用正确的脚本路径
+            cmd = ["python", str(self.base_dir / "scripts" / "novel_generator.py"), "3"]
             result = subprocess.run(
                 cmd, 
                 text=True, 
                 encoding='utf-8', 
-                errors='replace',  # 替换无法解码的字符
+                errors='replace',
                 cwd=self.base_dir
             )
             

@@ -1,3 +1,4 @@
+# scripts/novel_generator.py
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
@@ -8,19 +9,29 @@
 """
 
 import sys
-import subprocess
 import argparse
+import shutil
+import re
 from datetime import datetime
 from pathlib import Path
+
+# 添加项目根目录到 sys.path
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+from markflow.cli.commands import execute_skill
 
 
 class NovelGenerator:
     def __init__(self):
-        self.base_dir = Path(__file__).parent
-        self.novel_dir = self.base_dir / "generated_novels"
-        self.audio_dir = self.base_dir / "audio_output"
-        self.novel_dir.mkdir(exist_ok=True)
-        self.audio_dir.mkdir(exist_ok=True)
+        self.base_dir = Path(__file__).parent.parent
+        
+        # ✅ 更新输出路径到技能目录
+        self.novel_dir = self.base_dir / "skills" / "novel_writer" / "output" / "novels"
+        self.audio_dir = self.base_dir / "skills" / "voice_assistant" / "output" / "audio"
+        self.novel_dir.mkdir(parents=True, exist_ok=True)
+        self.audio_dir.mkdir(parents=True, exist_ok=True)
 
     def get_today(self):
         return datetime.now().strftime("%Y%m%d")
@@ -28,26 +39,14 @@ class NovelGenerator:
     def get_today_display(self):
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    def run_command(self, cmd):
-        try:
-            result = subprocess.run(cmd, text=True, encoding='utf-8', errors='replace')
-            if result.returncode != 0:
-                print(f"⚠️ 命令执行失败，返回码: {result.returncode}")
-                return False
-            return True
-        except Exception as e:
-            print(f"❌ 执行异常: {e}")
-            return False
-
     def get_current_chapters(self, novel_file: Path) -> int:
         """统计当前章节数"""
-        if not novel_file.exists():
+        if not novel_file or not novel_file.exists():
             return 0
         try:
             with open(novel_file, 'r', encoding='utf-8') as f:
                 content = f.read()
             # 统计 "第X章" 的数量
-            import re
             chapters = re.findall(r'第\d+章', content)
             return len(chapters)
         except:
@@ -56,24 +55,26 @@ class NovelGenerator:
     def get_novel_file(self) -> Path:
         """获取当前使用的小说文件"""
         today = self.get_today()
-        zh_file = self.novel_dir / f"novel_zh_{today}.txt"
         
-        # 优先使用今天的文件
+        # ✅ 先查找新目录
+        zh_file = self.novel_dir / f"novel_zh_{today}.txt"
         if zh_file.exists():
             return zh_file
         
-        # 查找最近的小说文件
-        zh_files = list(self.novel_dir.glob("novel_zh_*.txt"))
-        if zh_files:
-            return sorted(zh_files)[-1]
+        # 查找新目录中的星际行者文件
+        star_files = list(self.novel_dir.glob("星际行者*.txt"))
+        if star_files:
+            return sorted(star_files)[-1]
         
-        # 兼容旧文件
-        old_files = list(self.novel_dir.glob("星际行者*.txt"))
-        if old_files:
-            return sorted(old_files)[-1]
+        # 兼容旧的 generated_novels 目录
+        old_novel_dir = self.base_dir / "generated_novels"
+        if old_novel_dir.exists():
+            old_files = list(old_novel_dir.glob("星际行者*.txt"))
+            if old_files:
+                return sorted(old_files)[-1]
         
         return None
-
+    
     def continue_novel(self, novel_file: Path, target_chapters: int) -> bool:
         """续写小说到目标章节数"""
         current = self.get_current_chapters(novel_file)
@@ -84,39 +85,61 @@ class NovelGenerator:
         
         print(f"📝 从 {current} 章续写到 {target_chapters} 章（+{target_chapters - current} 章）")
         
-        cmd = [
-            "python", "-m", "markflow.cli.commands", "execute", "NovelWriterOllama",
-            "genre=科幻",
-            "title=星际行者",
-            "outline=一个普通少年意外获得星际航行能力，在宇宙中探索未知文明",
-            "characters=主角阿星，16岁，好奇心强；AI助手小智，幽默风趣",
-            f"chapter_count={target_chapters}",
-            "model=qwen2.5:7b",
-            f"continue_from={novel_file}"
-        ]
-        
-        return self.run_command(cmd)
+        try:
+            # ✅ 调用 novel_writer 技能
+            result = execute_skill(
+                "novel_writer",
+                genre="科幻",
+                title="星际行者",
+                outline="一个普通少年意外获得星际航行能力，在宇宙中探索未知文明",
+                characters="主角阿星，16岁，好奇心强；AI助手小智，幽默风趣",
+                chapter_count=target_chapters,
+                model="qwen2.5:7b",
+                continue_from=str(novel_file) if novel_file and novel_file.exists() else ""
+            )
+            return result is not None
+        except Exception as e:
+            print(f"❌ 续写失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
     def generate_audiobook(self, text_file: Path) -> bool:
         """生成有声书"""
-        today = self.get_today()
-        audio_file = self.audio_dir / f"novel_zh_{today}.mp3"
-
         print("[2/2] 正在生成有声书...")
-        cmd = [
-            "python", "-m", "markflow.cli.commands", "execute", "VoiceAssistant",
-            "action=tts",
-            f"text_file={text_file}",
-            "voice=zh-CN-XiaoxiaoNeural",
-            "chunk_size=10000",
-            f"output_file={audio_file}"
-        ]
-
-        if not self.run_command(cmd):
+        
+        # 确定输出文件名
+        today = self.get_today()
+        if text_file:
+            # 使用小说文件名生成音频文件名
+            base_name = text_file.stem
+            audio_file = self.audio_dir / f"{base_name}.mp3"
+        else:
+            audio_file = self.audio_dir / f"novel_zh_{today}.mp3"
+        
+        try:
+            # ✅ 调用 voice_assistant 技能
+            result = execute_skill(
+                "voice_assistant",
+                action="tts",
+                text_file=str(text_file) if text_file and text_file.exists() else "",
+                voice="zh-CN-XiaoxiaoNeural",
+                chunk_size=10000,
+                output_file=str(audio_file)
+            )
+            
+            if result is not None:
+                print(f"   ✅ 有声书：{audio_file}")
+                return True
+            else:
+                print("   ❌ 有声书生成失败")
+                return False
+                
+        except Exception as e:
+            print(f"   ❌ 有声书生成失败: {e}")
+            import traceback
+            traceback.print_exc()
             return False
-
-        print(f"   ✅ 有声书：{audio_file}")
-        return True
 
     def run(self, target_chapters: int = None):
         """执行主流程"""
@@ -138,28 +161,35 @@ class NovelGenerator:
                 source = sorted(old_files)[-1]
                 today = self.get_today()
                 novel_file = self.novel_dir / f"novel_zh_{today}.txt"
-                import shutil
                 shutil.copy2(source, novel_file)
                 print(f"📂 从 {source} 复制到 {novel_file}")
             else:
                 # 首次生成 3 章
                 print("📝 首次生成 3 章...")
-                cmd = [
-                    "python", "-m", "markflow.cli.commands", "execute", "NovelWriterOllama",
-                    "genre=科幻",
-                    "title=星际行者",
-                    "outline=一个普通少年意外获得星际航行能力，在宇宙中探索未知文明",
-                    "characters=主角阿星，16岁，好奇心强；AI助手小智，幽默风趣",
-                    "chapter_count=3",
-                    "model=qwen2.5:7b",
-                    "continue_from="
-                ]
-                if not self.run_command(cmd):
+                try:
+                    result = execute_skill(
+                        "novel_writer",
+                        genre="科幻",
+                        title="星际行者",
+                        outline="一个普通少年意外获得星际航行能力，在宇宙中探索未知文明",
+                        characters="主角阿星，16岁，好奇心强；AI助手小智，幽默风趣",
+                        chapter_count=3,
+                        model="qwen2.5:7b",
+                        continue_from=""
+                    )
+                    if result is None:
+                        print("❌ 生成失败")
+                        return
+                    novel_file = self.get_novel_file()
+                except Exception as e:
+                    print(f"❌ 生成失败: {e}")
+                    import traceback
+                    traceback.print_exc()
                     return
-                novel_file = self.get_novel_file()
-                if novel_file is None:
-                    print("❌ 生成失败")
-                    return
+        
+        if novel_file is None:
+            print("❌ 未找到小说文件")
+            return
         
         # 计算目标章节数
         current = self.get_current_chapters(novel_file)
@@ -185,7 +215,7 @@ class NovelGenerator:
         print(f"   📊 章节：{final_chapters} 章")
         print(f"   🎤 有声书：{self.audio_dir}/novel_zh_{self.get_today()}.mp3")
         print()
-    
+
 
 def main():
     parser = argparse.ArgumentParser(
