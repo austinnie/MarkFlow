@@ -14,6 +14,7 @@
 import sys
 import argparse
 import re
+import shutil
 from pathlib import Path
 from datetime import datetime
 
@@ -28,8 +29,12 @@ class NewsVoiceBroadcast:
     """新闻语音播报器 - 使用 news_aggregator + voice_assistant"""
     
     def __init__(self):
-        self.output_dir = project_root / "skills" / "voice_assistant" / "output" / "audio"
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        # ✅ 统一输出目录
+        self.news_dir = project_root / "news_broadcast"
+        self.report_dir = self.news_dir / "reports"
+        self.audio_dir = self.news_dir / "audio"
+        self.report_dir.mkdir(parents=True, exist_ok=True)
+        self.audio_dir.mkdir(parents=True, exist_ok=True)
         
         self.category_names = {
             "tech": "科技",
@@ -78,7 +83,6 @@ class NewsVoiceBroadcast:
             summary = news.get("summary", "")
             source = news.get("source", "未知来源")
             
-            # 清理特殊字符
             title = re.sub(r'[\[\]]', '', title)
             summary = re.sub(r'[\[\]]', '', summary)
             
@@ -92,13 +96,21 @@ class NewsVoiceBroadcast:
         
         return "\n".join(lines)
     
+    def _save_report(self, text: str, category: str) -> Path:
+        """保存新闻报告到统一目录"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        report_file = self.report_dir / f"news_{category}_{timestamp}.txt"
+        with open(report_file, 'w', encoding='utf-8') as f:
+            f.write(text)
+        return report_file
+    
     def _text_to_speech(self, text: str, output_file: str = None) -> str:
-        """调用 voice_assistant 合成语音"""
+        """调用 voice_assistant 合成语音，输出到统一目录"""
         if not output_file:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_file = f"news_broadcast_{timestamp}.mp3"
         
-        output_path = self.output_dir / output_file
+        output_path = self.audio_dir / output_file
         
         print(f"🔊 正在合成语音: {output_path.name}")
         
@@ -126,26 +138,27 @@ class NewsVoiceBroadcast:
             return None
     
     def _play_audio(self, audio_path: str):
-        """播放音频"""
-        import subprocess
-        import platform
-        
+        """使用 music_player 播放音频"""
         if not audio_path or not Path(audio_path).exists():
             print(f"❌ 音频文件不存在: {audio_path}")
             return
         
-        print(f"▶️ 播放音频: {audio_path}")
+        print(f"▶️ 使用 music_player 播放: {audio_path}")
         
         try:
-            system = platform.system()
-            if system == 'Windows':
-                os.startfile(audio_path)
-            elif system == 'Darwin':
-                subprocess.Popen(['open', audio_path])
+            result = execute_skill(
+                "music_player",
+                action="play",
+                path=audio_path
+            )
+            
+            if result and result.get("status") == "success":
+                print(f"✅ 播放成功")
             else:
-                subprocess.Popen(['xdg-open', audio_path])
+                print(f"❌ 播放失败: {result}")
+                
         except Exception as e:
-            print(f"❌ 播放失败: {e}")
+            print(f"❌ 播放异常: {e}")
     
     def run(self, category: str = "tech", top_n: int = 5, 
             output_file: str = None, play: bool = False, 
@@ -165,13 +178,11 @@ class NewsVoiceBroadcast:
         # 2. 格式化文本
         text = self._format_news_text(news_list, category)
         
-        if save_text:
-            text_file = self.output_dir / f"news_script_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-            with open(text_file, 'w', encoding='utf-8') as f:
-                f.write(text)
-            print(f"📄 播报文本已保存: {text_file}")
+        # 3. 保存报告
+        report_file = self._save_report(text, category)
+        print(f"📄 新闻报告已保存: {report_file}")
         
-        # 3. 显示预览
+        # 4. 显示预览
         print("\n" + "-" * 60)
         print("📝 播报内容预览:")
         print("-" * 60)
@@ -182,14 +193,18 @@ class NewsVoiceBroadcast:
             print("... (共 {} 行)".format(len(lines)))
         print("-" * 60)
         
-        # 4. 合成语音
+        # 5. 合成语音
         audio_path = self._text_to_speech(text, output_file)
         
-        # 5. 播放
+        # 6. 播放
         if play and audio_path:
             self._play_audio(audio_path)
         
-        print("\n✅ 播报完成!")
+        print("\n" + "=" * 60)
+        print("✅ 播报完成!")
+        print(f"📄 报告: {report_file}")
+        print(f"🎵 音频: {audio_path}")
+        print("=" * 60)
 
 
 def main():
@@ -210,8 +225,6 @@ def main():
                         help="输出音频文件名 (默认: 自动生成)")
     parser.add_argument("--play", "-p", action="store_true",
                         help="合成后播放音频")
-    parser.add_argument("--save-text", "-s", action="store_true",
-                        help="保存播报文本")
     
     args = parser.parse_args()
     
@@ -221,7 +234,6 @@ def main():
         top_n=args.top,
         output_file=args.output,
         play=args.play,
-        save_text=args.save_text
     )
 
 
