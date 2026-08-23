@@ -34,7 +34,8 @@ class SkillRegistry:
         else:
             self._metadata[name] = {
                 "name": name,
-                "description": skill_class.__doc__ or f"{name} skill"
+                "description": skill_class.__doc__ or f"{name} skill",
+                "inputs": []
             }
         
         logger.info(f"注册技能: {name}")
@@ -83,8 +84,6 @@ class SkillRegistry:
     
     def load_from_file(self, file_path: Path) -> Optional[Type]:
         """从文件加载技能"""
-
-        # 强制重新加载，不使用缓存
         module_name = file_path.stem
         if module_name in self._skills:
             self.unregister(module_name)
@@ -100,24 +99,18 @@ class SkillRegistry:
                     attr.__module__ == module.__name__ and
                     attr_name != 'SkillSpec'):
                     if hasattr(attr, 'execute') and callable(getattr(attr, 'execute')):
-                        # ✅ 从 meta.json 加载元数据
-                        meta_file = file_path.parent / f"{file_path.stem}.meta.json"
-                        metadata = None
+                        # 从 meta.json 加载元数据
+                        meta_file = file_path.parent / "meta.json"
+                        metadata = {}
                         if meta_file.exists():
                             try:
                                 with open(meta_file, 'r', encoding='utf-8') as f:
                                     metadata = json.load(f)
-                                print(f"   📄 加载 meta: {file_path.stem} - inputs: {len(metadata.get('inputs', []))} 个")
+                                if 'inputs' not in metadata:
+                                    metadata['inputs'] = []
+                                print(f"   📄 加载 meta: {file_path.parent.name} - inputs: {len(metadata.get('inputs', []))} 个")
                             except Exception as e:
                                 print(f"   ⚠️ 读取 meta.json 失败: {e}")
-                        
-                        # ✅ 确保 metadata 包含 inputs
-                        if metadata is None:
-                            metadata = {}
-                        if 'inputs' not in metadata:
-                            metadata['inputs'] = []
-                        if 'description' not in metadata:
-                            metadata['description'] = attr.__doc__ or f"{attr_name} skill"
                         
                         self.register(attr, metadata)
                         return attr
@@ -128,19 +121,22 @@ class SkillRegistry:
         except Exception as e:
             logger.error(f"加载技能失败 {file_path}: {e}")
             return None
-        
+    
     def load_from_directory(self, directory: Path) -> List[Type]:
         """从目录加载所有技能（支持子目录）"""
         loaded = []
         
-        # ✅ 扫描所有子目录中的 skill.py
+        # 扫描子目录中的 skill.py
         for subdir in directory.iterdir():
             if subdir.is_dir():
                 skill_file = subdir / "skill.py"
-                if skill_file.exists():
+                meta_file = subdir / "meta.json"
+                if skill_file.exists() and meta_file.exists():
                     skill_class = self.load_from_file(skill_file)
                     if skill_class:
                         loaded.append(skill_class)
+                elif skill_file.exists() and not meta_file.exists():
+                    print(f"⚠️ 跳过 {subdir.name}：缺少 meta.json")
         
         # 兼容旧的扁平结构
         for py_file in directory.glob("*.py"):
