@@ -432,6 +432,34 @@ class DocGenerator:
             lines.append("| mpv | ✅ | ✅ | 最后备选 |")
             lines.append("")        
         # ============ 新增结束 ============
+
+        # ============ news_aggregator 特殊处理 ============
+        if project_name == "news_aggregator":
+            lines.append("## 支持的功能")
+            lines.append("")
+            lines.append("| 功能 | 说明 |")
+            lines.append("|------|------|")
+            lines.append("| 📡 RSS 抓取 | 自动抓取多个 RSS 源 |")
+            lines.append("| 🤖 AI 摘要 | 使用 Ollama 生成智能摘要 |")
+            lines.append("| 📂 分类聚合 | 科技/财经/国际/中国/美国/日本/韩国 |")
+            lines.append("| 📰 每日简报 | 生成格式化的新闻简报 |")
+            lines.append("| 🔗 来源去重 | 自动去重，减少重复内容 |")
+            lines.append("| 📁 报告保存 | 保存为 TXT 格式 |")
+            lines.append("")
+            
+            lines.append("## 支持的地区分类")
+            lines.append("")
+            lines.append("| 分类 | 说明 | 源数量 |")
+            lines.append("|------|------|--------|")
+            lines.append("| `tech` | 科技新闻（国际 + 中日韩） | 20+ |")
+            lines.append("| `business` | 财经新闻（国际 + 中日韩） | 15+ |")
+            lines.append("| `world` | 国际新闻 | 20+ |")
+            lines.append("| `china` | 中国新闻 | 12 |")
+            lines.append("| `usa` | 美国新闻 | 14 |")
+            lines.append("| `japan` | 日本新闻 | 8 |")
+            lines.append("| `korea` | 韩国新闻 | 6 |")
+            lines.append("")
+        # ============ 新增结束 ============
         
         # 从 meta.json 读取参数说明
         meta_file = Path(f"./skills/{project_name}/meta.json")
@@ -547,6 +575,22 @@ class DocGenerator:
             lines.append("")
             lines.append(f"# 查看播放状态")
             lines.append(f"python -m markflow.cli.commands execute {project_name} action=\"info\"")
+
+        elif project_name == "news_aggregator":
+            lines.append(f"# 抓取科技新闻（5条）")
+            lines.append(f"python -m markflow.cli.commands execute {project_name} category=\"tech\" top_n=5")
+            lines.append("")
+            lines.append(f"# 抓取中国新闻（10条）")
+            lines.append(f"python -m markflow.cli.commands execute {project_name} category=\"china\" top_n=10")
+            lines.append("")
+            lines.append(f"# 抓取财经新闻")
+            lines.append(f"python -m markflow.cli.commands execute {project_name} category=\"business\" top_n=5")
+            lines.append("")
+            lines.append(f"# 自定义源")
+            lines.append(f"python -m markflow.cli.commands execute {project_name} sources=\"TechCrunch,BBC\"")
+            lines.append("")
+            lines.append(f"# 语音播报新闻（配合 voice_assistant）")
+            lines.append(f"python scripts/news_voice_broadcast.py --category tech --top 5 --play")
             
         else:
             meta_file = Path(f"./skills/{project_name}/meta.json")
@@ -600,6 +644,24 @@ class DocGenerator:
             lines.append("")
             lines.append("```bash")
             lines.append(f"python -m markflow.cli.commands execute {project_name} action=\"info\"")
+            lines.append("```")
+            lines.append("")
+
+        elif project_name == "news_aggregator":
+            lines.append("### 查看报告")
+            lines.append("")
+            lines.append("```bash")
+            lines.append(f"cat skills/news_aggregator/output/news_*.txt")
+            lines.append("```")
+            lines.append("")
+            lines.append("### 语音播报")
+            lines.append("")
+            lines.append("```bash")
+            lines.append(f"# 科技新闻播报")
+            lines.append(f"python scripts/news_voice_broadcast.py --category tech --top 5 --play")
+            lines.append("")
+            lines.append(f"# 中国新闻播报")
+            lines.append(f"python scripts/news_voice_broadcast.py --category china --top 5 --play")
             lines.append("```")
             lines.append("")
             

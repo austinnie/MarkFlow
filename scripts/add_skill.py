@@ -542,8 +542,8 @@ class SkillAdder:
             required = "必填" if inp.get("required", False) else "可选"
             line = "- **" + inp["name"] + "** (" + inp["type"] + "): " + inp["description"] + " (" + required + ")"
             lines.append(line)
-            if inp.get("default"):
-                lines.append("  - 默认: " + inp["default"])
+            if inp.get("default") is not None:
+                lines.append("  - 默认: " + str(inp["default"]))
         lines.append("")
         lines.append("## 输出")
         for out in data.get("outputs", []):
