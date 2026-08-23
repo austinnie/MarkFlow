@@ -19,9 +19,10 @@ from pathlib import Path
 
 class SDImageGenerator:
     def __init__(self):
-        self.base_dir = Path(__file__).parent
-        self.output_dir = self.base_dir / "generated_images"
-        self.output_dir.mkdir(exist_ok=True)
+        self.base_dir = Path(__file__).parent.parent
+        # ✅ 改为指向技能的输出目录
+        self.output_dir = self.base_dir / "skills" / "sd_image_generator" / "output" / "images"
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # ✅ 所有方案配置 - 安全优雅版
         self.schemes = [
@@ -216,11 +217,18 @@ class SDImageGenerator:
             print(f"❌ 执行异常: {e}")
             return False
 
+    # scripts/generate_all_girls.py 的 generate_one 方法
+
     def generate_one(self, scheme):
-        """生成单张图片"""
+        """生成单张图片 - 直接调用"""
         print(f"\n{'='*60}")
         print(f"   [{scheme['id']}/15] {scheme['name']}")
         print('='*60)
+
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).parent.parent))
+        from markflow.cli.commands import execute_skill
 
         seed = scheme.get('seed', -1)
         if isinstance(seed, str):
@@ -229,21 +237,24 @@ class SDImageGenerator:
             except:
                 seed = -1
 
-        cmd = [
-            "python", "-m", "markflow.cli.commands", "execute", "sd_image_generator",
-            f'prompt="{scheme["prompt"]}"',
-            f'negative_prompt="{scheme["negative_prompt"]}"',
-            f'model_name={scheme["model"]}',
-            f'width={scheme["width"]}',
-            f'height={scheme["height"]}',
-            f'steps={scheme["steps"]}',
-            f'cfg_scale={scheme["cfg_scale"]}',
-            f'seed={seed}',
-            f'batch_size={scheme.get("batch_size", 1)}'
-        ]
-
-        return self.run_command(cmd)
-
+        try:
+            result = execute_skill(
+                "sd_image_generator",
+                prompt=scheme["prompt"],
+                negative_prompt=scheme["negative_prompt"],
+                model_name=scheme["model"],
+                width=scheme["width"],
+                height=scheme["height"],
+                steps=scheme["steps"],
+                cfg_scale=scheme["cfg_scale"],
+                seed=seed,
+                batch_size=scheme.get("batch_size", 1)
+            )
+            return result is not None
+        except Exception as e:
+            print(f"❌ 执行失败: {e}")
+            return False
+        
     def list_schemes(self):
         """列出所有方案"""
         print("\n" + "="*60)

@@ -80,15 +80,22 @@ def main():
     if args.command == "build":
         build_skill(args, executor, console)
     elif args.command == "execute":
-        # 获取技能名称
         skill_name = getattr(args, 'skill', None)
         if not skill_name:
             console.print("[red]❌ 请指定技能名称[/red]")
             return
         
-        # 提取参数
-        kwargs = {k: v for k, v in vars(args).items() 
-                  if k not in ['command', 'skill', 'func'] and v is not None}
+        # ✅ 改进参数解析 - 支持 key=value 和 key="value with spaces"
+        kwargs = {}
+        for param in args.params or []:
+            if '=' in param:
+                key, value = param.split('=', 1)
+                # 移除可能的引号（支持单引号和双引号）
+                value = value.strip()
+                if (value.startswith('"') and value.endswith('"')) or \
+                   (value.startswith("'") and value.endswith("'")):
+                    value = value[1:-1]
+                kwargs[key] = value
         
         execute_skill(skill_name, **kwargs)
     elif args.command == "list":
@@ -137,45 +144,55 @@ def build_skill(args, executor, console):
         sys.exit(1)
 
 
-# markflow/cli/commands.py
-# 找到 execute 命令部分，更新技能加载逻辑
-
-# 找到类似这样的代码：
 def execute_skill(skill_name, **kwargs):
     """执行技能"""
     import importlib
     import sys
     from pathlib import Path
+    import ast
     
-    # 确保项目根目录在 sys.path 中
     project_root = Path(__file__).parent.parent.parent
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
     
     try:
-        # 尝试从新的 skills 目录导入
         module = importlib.import_module(f"skills.{skill_name}.skill")
         
-        # 查找技能类
         skill_class = None
         for attr_name in dir(module):
-            if attr_name.endswith("Generator") or \
-               attr_name.endswith("Assistant") or \
-               attr_name.endswith("Toolbox") or \
-               attr_name.endswith("Viewer"):
-                skill_class = getattr(module, attr_name)
+            attr = getattr(module, attr_name)
+            if (isinstance(attr, type) and 
+                attr.__module__ == module.__name__ and
+                attr_name not in ['SkillSpec']):
+                skill_class = attr
                 break
         
         if not skill_class:
             print(f"❌ 未找到技能类: {skill_name}")
             return False
         
-        # 创建实例并执行
         skill = skill_class()
         
-        # 如果 skill 有 execute 方法
+        # ✅ 改进参数解析
+        parsed_kwargs = {}
+        for key, value in kwargs.items():
+            if isinstance(value, str):
+                # 尝试解析为 Python 字面量
+                try:
+                    parsed = ast.literal_eval(value)
+                    parsed_kwargs[key] = parsed
+                except (ValueError, SyntaxError):
+                    # 如果不是字面量，保留字符串（去除可能的引号）
+                    cleaned = value.strip()
+                    if (cleaned.startswith('"') and cleaned.endswith('"')) or \
+                       (cleaned.startswith("'") and cleaned.endswith("'")):
+                        cleaned = cleaned[1:-1]
+                    parsed_kwargs[key] = cleaned
+            else:
+                parsed_kwargs[key] = value
+        
         if hasattr(skill, 'execute'):
-            result = skill.execute(**kwargs)
+            result = skill.execute(**parsed_kwargs)
             print(f"✅ 执行成功")
             return result
         else:
@@ -189,8 +206,8 @@ def execute_skill(skill_name, **kwargs):
         print(f"❌ 执行失败: {e}")
         import traceback
         traceback.print_exc()
-        return False    
-
+        return False
+        
 def list_skills(executor, console):
     """列出所有技能"""
     skill_dir = Path("./skills")
