@@ -249,17 +249,28 @@ def list_skills(executor, console):
 
 def show_info(args, executor, console):
     """显示技能详情"""
-    skill_dir = Path("./skills")
-    if skill_dir.exists():
-        executor.registry.load_from_directory(skill_dir)
+    from pathlib import Path
+    import json
     
-    info = executor.get_skill_info(args.skill)
+    skill_name = args.skill
     
-    if not info:
-        console.print("[red]技能 '{}' 不存在[/red]".format(args.skill))
+    # ✅ 直接从 skills 目录读取
+    skill_dir = Path("./skills") / skill_name
+    meta_file = skill_dir / "meta.json"
+    
+    if not meta_file.exists():
+        console.print(f"[red]技能 '{skill_name}' 不存在[/red]")
+        console.print(f"[yellow]  请检查: {meta_file}[/yellow]")
         sys.exit(1)
     
-    console.print("\n[bold cyan]📋 {}[/bold cyan]".format(args.skill))
+    try:
+        with open(meta_file, 'r', encoding='utf-8') as f:
+            info = json.load(f)
+    except Exception as e:
+        console.print(f"[red]读取技能信息失败: {e}[/red]")
+        sys.exit(1)
+    
+    console.print("\n[bold cyan]📋 {}[/bold cyan]".format(skill_name))
     console.print("  描述: {}".format(info.get('description', '')))
     console.print("  版本: {}".format(info.get('version', '1.0.0')))
     
@@ -272,10 +283,12 @@ def show_info(args, executor, console):
     if info.get('inputs'):
         console.print("\n[bold]输入参数:[/bold]")
         for inp in info['inputs']:
-            console.print("  - {} ({}): {}".format(
+            required = "必填" if inp.get('required', False) else "可选"
+            console.print("  - {} ({}): {} [{}]".format(
                 inp['name'], 
                 inp.get('type', 'string'), 
-                inp.get('description', '')
+                inp.get('description', ''),
+                required
             ))
     
     if info.get('outputs'):
@@ -287,7 +300,14 @@ def show_info(args, executor, console):
         console.print("\n[bold]配置:[/bold]")
         for key, value in info['config'].items():
             console.print("  - {}: {}".format(key, value))
-
+    
+    # 显示 skill.py 路径
+    skill_file = skill_dir / "skill.py"
+    if skill_file.exists():
+        console.print("\n[bold]文件位置:[/bold]")
+        console.print("  📄 skill.py: {}".format(skill_file))
+        console.print("  📄 meta.json: {}".format(meta_file))
+        console.print("  📁 output/: {}/output/".format(skill_dir))
 
 def generate_skill(args, executor, console):
     """从模板生成技能"""

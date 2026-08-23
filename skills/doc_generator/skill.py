@@ -21,7 +21,7 @@ class DocGenerator:
     """
     代码文档自动生成器
     """
-    
+
     def __init__(self, config: Dict[str, Any] = None):
         """初始化技能"""
         self.config = config or {}
@@ -29,19 +29,19 @@ class DocGenerator:
         self.version = "1.0.0"
         self._setup_logging()
         self._setup_config()
-        
+
         logger.info("DocGenerator 初始化完成")
-    
+
     def _setup_logging(self):
         log_level = self.config.get('log_level', 'INFO')
         logging.basicConfig(
             level=getattr(logging, log_level.upper()),
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
-    
+
     def _setup_config(self):
         defaults = {
-            'output_dir': './generated_docs',
+            'output_dir': './skills',
             'default_doc_type': 'all',
             'default_format': 'md',
             'exclude_patterns': ['__pycache__', '*.pyc', 'test_*', '*_test.py'],
@@ -50,42 +50,40 @@ class DocGenerator:
         for key, value in defaults.items():
             if key not in self.config:
                 self.config[key] = value
-    
+
     def _validate_inputs(self, **kwargs) -> bool:
         """验证输入参数"""
         if 'code_path' not in kwargs or not kwargs['code_path']:
             raise ValueError("code_path 是必填参数")
-        
+
         code_path = Path(kwargs['code_path'])
         if not code_path.exists():
             raise ValueError(f"代码路径不存在: {code_path}")
-        
+
         doc_type = kwargs.get('doc_type', self.config.get('default_doc_type', 'all'))
         if doc_type not in ['api', 'readme', 'all']:
             raise ValueError(f"doc_type 必须为 api、readme 或 all，当前值: {doc_type}")
-        
+
         output_format = kwargs.get('output_format', self.config.get('default_format', 'md'))
         if output_format not in ['md', 'html']:
             raise ValueError(f"output_format 必须为 md 或 html，当前值: {output_format}")
-        
+
         return True
-    
+
     def _should_include_file(self, file_path: Path) -> bool:
         """检查文件是否应该被包含"""
-        # 检查排除模式
         exclude_patterns = self.config.get('exclude_patterns', ['__pycache__', '*.pyc'])
         for pattern in exclude_patterns:
             if file_path.match(pattern):
                 return False
-        
-        # 检查包含模式
+
         include_patterns = self.config.get('include_patterns', ['*.py'])
         for pattern in include_patterns:
             if file_path.match(pattern):
                 return True
-        
+
         return False
-    
+
     def _collect_python_files(self, code_path: Path) -> List[Path]:
         """收集所有 Python 文件"""
         files = []
@@ -94,16 +92,15 @@ class DocGenerator:
                 files.append(code_path)
         else:
             for root, dirs, files_in_dir in os.walk(code_path):
-                # 排除某些目录
                 dirs[:] = [d for d in dirs if d not in ['__pycache__', '.git', 'venv', 'env', 'node_modules']]
                 for file in files_in_dir:
                     file_path = Path(root) / file
                     if file_path.suffix == '.py' and self._should_include_file(file_path):
                         files.append(file_path)
         return files
-    
+
     def _parse_python_file(self, file_path: Path) -> Dict[str, Any]:
-        """解析 Python 文件"""
+        """解析 Python 文件 - 完整版"""
         result = {
             'file_path': str(file_path),
             'module_name': file_path.stem,
@@ -113,46 +110,58 @@ class DocGenerator:
             'functions': [],
             'constants': []
         }
-        
+
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            
+
             tree = ast.parse(content)
-            
-            # 提取模块 docstring
+
             module_doc = ast.get_docstring(tree)
             if module_doc:
                 result['docstring'] = module_doc
-            
-            # 解析 AST
-            for node in ast.iter_child_nodes(tree):
+
+            for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
                     for alias in node.names:
-                        result['imports'].append(alias.name)
+                        if alias.name not in result['imports']:
+                            result['imports'].append(alias.name)
                 elif isinstance(node, ast.ImportFrom):
-                    module_name = node.module
+                    module_name = node.module or ''
                     for alias in node.names:
-                        result['imports'].append(f"{module_name}.{alias.name}" if module_name else alias.name)
+                        full_name = f"{module_name}.{alias.name}" if module_name else alias.name
+                        if full_name not in result['imports']:
+                            result['imports'].append(full_name)
                 elif isinstance(node, ast.ClassDef):
-                    class_info = self._parse_class(node, content)
-                    result['classes'].append(class_info)
+                    class_names = [c['name'] for c in result['classes']]
+                    if node.name not in class_names:
+                        class_info = self._parse_class(node, content)
+                        result['classes'].append(class_info)
                 elif isinstance(node, ast.FunctionDef):
-                    func_info = self._parse_function(node, content)
-                    result['functions'].append(func_info)
+                    func_names = [f['name'] for f in result['functions']]
+                    if node.name not in func_names and not node.name.startswith('_'):
+                        func_info = self._parse_function(node, content)
+                        result['functions'].append(func_info)
+                elif isinstance(node, ast.AsyncFunctionDef):
+                    func_names = [f['name'] for f in result['functions']]
+                    if node.name not in func_names and not node.name.startswith('_'):
+                        func_info = self._parse_function(node, content)
+                        result['functions'].append(func_info)
                 elif isinstance(node, ast.Assign):
                     for target in node.targets:
                         if isinstance(target, ast.Name):
-                            result['constants'].append({
-                                'name': target.id,
-                                'value': self._get_constant_value(node.value)
-                            })
-            
+                            const_names = [c['name'] for c in result['constants']]
+                            if target.id not in const_names:
+                                result['constants'].append({
+                                    'name': target.id,
+                                    'value': self._get_constant_value(node.value)
+                                })
+
         except Exception as e:
             logger.warning(f"解析文件失败 {file_path}: {e}")
-        
+
         return result
-    
+
     def _parse_class(self, node: ast.ClassDef, content: str) -> Dict[str, Any]:
         """解析类"""
         class_info = {
@@ -163,9 +172,12 @@ class DocGenerator:
             'attributes': [],
             'class_variables': []
         }
-        
+
         for item in node.body:
             if isinstance(item, ast.FunctionDef):
+                method_info = self._parse_function(item, content)
+                class_info['methods'].append(method_info)
+            elif isinstance(item, ast.AsyncFunctionDef):
                 method_info = self._parse_function(item, content)
                 class_info['methods'].append(method_info)
             elif isinstance(item, ast.Assign):
@@ -175,10 +187,10 @@ class DocGenerator:
                             'name': target.id,
                             'value': self._get_constant_value(item.value)
                         })
-        
+
         return class_info
-    
-    def _parse_function(self, node: ast.FunctionDef, content: str) -> Dict[str, Any]:
+
+    def _parse_function(self, node, content: str) -> Dict[str, Any]:
         """解析函数"""
         func_info = {
             'name': node.name,
@@ -189,8 +201,7 @@ class DocGenerator:
             'line_number': node.lineno,
             'is_async': isinstance(node, ast.AsyncFunctionDef)
         }
-        
-        # 解析参数
+
         for arg in node.args.args:
             param_info = {
                 'name': arg.arg,
@@ -198,27 +209,24 @@ class DocGenerator:
                 'default': None
             }
             func_info['params'].append(param_info)
-        
-        # 解析默认参数
+
         defaults = node.args.defaults
         if defaults:
             for i, default in enumerate(defaults):
                 param_index = len(func_info['params']) - len(defaults) + i
                 if param_index < len(func_info['params']):
                     func_info['params'][param_index]['default'] = self._get_constant_value(default)
-        
-        # 解析返回类型
+
         if node.returns:
             func_info['return_type'] = self._get_annotation(node.returns)
-        
-        # 解析装饰器
+
         for decorator in node.decorator_list:
             decorator_name = self._get_name(decorator)
             if decorator_name:
                 func_info['decorators'].append(decorator_name)
-        
+
         return func_info
-    
+
     def _get_name(self, node) -> str:
         """获取 AST 节点名称"""
         if isinstance(node, ast.Name):
@@ -230,7 +238,7 @@ class DocGenerator:
         elif hasattr(node, 'id'):
             return node.id
         return str(node)[:50]
-    
+
     def _get_annotation(self, node) -> str:
         """获取类型注解字符串"""
         if isinstance(node, ast.Name):
@@ -241,29 +249,36 @@ class DocGenerator:
             return f"{self._get_name(node.value)}.{node.attr}"
         elif isinstance(node, ast.Constant):
             return repr(node.value)
+        elif hasattr(ast, 'Str') and isinstance(node, ast.Str):
+            return node.s
+        elif hasattr(ast, 'NameConstant') and isinstance(node, ast.NameConstant):
+            return str(node.value)
         return str(node)[:50]
-    
+
     def _get_constant_value(self, node) -> Any:
         """获取常量值"""
         if isinstance(node, ast.Constant):
             return node.value
         elif isinstance(node, ast.Name):
             return node.id
-        elif isinstance(node, ast.Str):
-            return node.s
         elif isinstance(node, ast.List):
             return [self._get_constant_value(elt) for elt in node.elts]
         elif isinstance(node, ast.Dict):
             return {self._get_constant_value(k): self._get_constant_value(v) for k, v in zip(node.keys, node.values)}
         elif isinstance(node, ast.Tuple):
             return tuple(self._get_constant_value(elt) for elt in node.elts)
+        elif hasattr(ast, 'Str') and isinstance(node, ast.Str):
+            return node.s
+        elif hasattr(ast, 'Num') and isinstance(node, ast.Num):
+            return node.n
+        elif hasattr(ast, 'NameConstant') and isinstance(node, ast.NameConstant):
+            return node.value
         return str(node)[:50]
-    
+
     def _generate_api_doc_md(self, parsed_files: List[Dict], project_name: str, project_description: str) -> str:
         """生成 API 参考文档（Markdown 格式）"""
         lines = []
-        
-        # 标题
+
         lines.append(f"# {project_name} API 参考")
         lines.append("")
         lines.append(f"*{project_description}*")
@@ -272,22 +287,20 @@ class DocGenerator:
         lines.append("")
         lines.append("---")
         lines.append("")
-        
-        # 按模块分组
+
         for file_info in parsed_files:
             module_name = file_info['module_name']
             file_path = file_info['file_path']
-            
+
             lines.append(f"## 模块: {module_name}")
             lines.append("")
             lines.append(f"**文件**: `{file_path}`")
             lines.append("")
-            
+
             if file_info['docstring']:
                 lines.append(file_info['docstring'])
                 lines.append("")
-            
-            # 导入信息
+
             if file_info['imports']:
                 lines.append("### 导入")
                 lines.append("")
@@ -296,8 +309,7 @@ class DocGenerator:
                 if len(file_info['imports']) > 10:
                     lines.append(f"- ... 还有 {len(file_info['imports']) - 10} 个导入")
                 lines.append("")
-            
-            # 类
+
             if file_info['classes']:
                 lines.append("### 类")
                 lines.append("")
@@ -310,16 +322,14 @@ class DocGenerator:
                     if cls['docstring']:
                         lines.append(f"- **说明**: {cls['docstring']}")
                         lines.append("")
-                    
-                    # 类变量
+
                     if cls['class_variables']:
                         lines.append("**类变量**:")
                         lines.append("")
                         for var in cls['class_variables']:
                             lines.append(f"- `{var['name']}` = `{var['value']}`")
                         lines.append("")
-                    
-                    # 方法
+
                     if cls['methods']:
                         lines.append("**方法**:")
                         lines.append("")
@@ -331,8 +341,7 @@ class DocGenerator:
                             if method['decorators']:
                                 lines.append(f"  - @{', @'.join(method['decorators'])}")
                         lines.append("")
-            
-            # 函数
+
             if file_info['functions']:
                 lines.append("### 函数")
                 lines.append("")
@@ -342,95 +351,221 @@ class DocGenerator:
                     if func['docstring']:
                         lines.append(f"  - {func['docstring'][:100]}")
                 lines.append("")
-        
+
         return '\n'.join(lines)
-    
-    def _generate_readme_md(self, parsed_files: List[Dict], project_name: str, 
+
+    def _generate_readme_md(self, parsed_files: List[Dict], project_name: str,
                            project_description: str, author: str) -> str:
         """生成 README 文档"""
         lines = []
-        
+
         # 标题
         lines.append(f"# {project_name}")
         lines.append("")
         lines.append(f"> {project_description}")
         lines.append("")
-        
-        # 作者
+
         if author:
             lines.append(f"**作者**: {author}")
             lines.append("")
-        
-        # 概览
-        total_classes = sum(len(f['classes']) for f in parsed_files)
-        total_functions = sum(len(f['functions']) for f in parsed_files)
-        
-        lines.append("## 📊 概览")
+
+        # 概览 - 统计类和方法
+        total_classes = 0
+        total_methods = 0
+        total_functions = 0
+
+        for f in parsed_files:
+            total_classes += len(f['classes'])
+            total_functions += len(f['functions'])
+            for cls in f['classes']:
+                total_methods += len(cls['methods'])
+
+        lines.append("## 概览")
         lines.append("")
         lines.append(f"- **文件数**: {len(parsed_files)}")
         lines.append(f"- **类数**: {total_classes}")
+        lines.append(f"- **方法数**: {total_methods}")
         lines.append(f"- **函数数**: {total_functions}")
         lines.append("")
-        
-        # 模块列表
-        lines.append("## 📁 模块列表")
-        lines.append("")
-        lines.append("| 模块 | 类数 | 函数数 |")
-        lines.append("|------|------|--------|")
-        for file_info in parsed_files:
-            lines.append(f"| `{file_info['module_name']}` | {len(file_info['classes'])} | {len(file_info['functions'])} |")
-        lines.append("")
-        
-        # 快速开始
-        lines.append("## 🚀 快速开始")
-        lines.append("")
-        lines.append("```python")
-        lines.append(f"from {parsed_files[0]['module_name'] if parsed_files else 'your_module'} import *")
-        lines.append("")
-        lines.append("# 使用示例")
-        lines.append("...")
-        lines.append("```")
-        lines.append("")
-        
-        # 安装
-        lines.append("## 📦 安装")
+
+        # 从 meta.json 读取参数说明
+        meta_file = Path(f"./skills/{project_name}/meta.json")
+        if meta_file.exists():
+            try:
+                with open(meta_file, 'r', encoding='utf-8') as f:
+                    meta = json.load(f)
+
+                if meta.get('description'):
+                    lines.append("## 技能描述")
+                    lines.append("")
+                    lines.append(meta['description'])
+                    lines.append("")
+
+                # 依赖
+                if meta.get('dependencies'):
+                    lines.append("## 依赖")
+                    lines.append("")
+                    lines.append("```bash")
+                    for dep in meta['dependencies']:
+                        lines.append(f"pip install {dep}")
+                    lines.append("```")
+                    lines.append("")
+
+                # 参数说明
+                if meta.get('inputs'):
+                    lines.append("## 参数说明")
+                    lines.append("")
+                    lines.append("| 参数 | 类型 | 默认值 | 说明 |")
+                    lines.append("|------|------|--------|------|")
+                    for inp in meta['inputs']:
+                        name = inp.get('name', '')
+                        dtype = inp.get('type', 'string')
+                        default = inp.get('default', '')
+                        desc = inp.get('description', '')
+                        lines.append(f"| `{name}` | {dtype} | `{default}` | {desc} |")
+                    lines.append("")
+
+                # 输出
+                if meta.get('outputs'):
+                    lines.append("## 输出")
+                    lines.append("")
+                    lines.append("| 字段 | 说明 |")
+                    lines.append("|------|------|")
+                    for out in meta['outputs']:
+                        name = out.get('name', '')
+                        desc = out.get('description', '')
+                        lines.append(f"| `{name}` | {desc} |")
+                    lines.append("")
+
+            except Exception as e:
+                logger.warning(f"读取 meta.json 失败: {e}")
+
+        # ========== 修改这里 ==========
+        # 使用方法
+        lines.append("## 使用方法")
         lines.append("")
         lines.append("```bash")
-        lines.append("pip install -e .")
+        lines.append(f"python -m markflow.cli.commands execute {project_name} [参数]")
         lines.append("```")
         lines.append("")
-        
+
+        # 动态生成示例
+        lines.append("### 示例")
+        lines.append("")
+        lines.append("```bash")
+
+        meta_file = Path(f"./skills/{project_name}/meta.json")
+        if meta_file.exists():
+            try:
+                with open(meta_file, 'r', encoding='utf-8') as f:
+                    meta = json.load(f)
+
+                inputs = meta.get('inputs', [])
+
+                if project_name == "voice_assistant":
+                    lines.append(f"# TTS 文本转语音")
+                    lines.append(f"python -m markflow.cli.commands execute {project_name} action=\"tts\" text=\"你好，欢迎使用 MarkFlow\"")
+                    lines.append("")
+                    lines.append(f"# STT 语音识别")
+                    lines.append(f"python -m markflow.cli.commands execute {project_name} action=\"stt\" audio_file=\"./audio.mp3\"")
+                    lines.append("")
+                    lines.append(f"# 列出可用语音")
+                    lines.append(f"python -m markflow.cli.commands execute {project_name} action=\"list_voices\"")
+
+                elif project_name == "novel_writer":
+                    lines.append(f"# 首次生成小说")
+                    lines.append(f"python -m markflow.cli.commands execute {project_name} genre=\"科幻\" title=\"星际行者\" outline=\"探索宇宙\" chapter_count=3")
+                    lines.append("")
+                    lines.append(f"# 断点续写")
+                    lines.append(f"python -m markflow.cli.commands execute {project_name} genre=\"科幻\" title=\"星际行者\" chapter_count=6 continue_from=\"./novel.txt\"")
+
+                elif project_name == "sd_image_generator":
+                    lines.append(f"# 生成图片")
+                    lines.append(f"python -m markflow.cli.commands execute {project_name} prompt=\"a beautiful sunset\" model_name=\"sd-v1-5-tiny.safetensors\"")
+
+                elif project_name == "image_toolbox":
+                    lines.append(f"# 批量压缩图片")
+                    lines.append(f"python -m markflow.cli.commands execute {project_name} source_dir=\"./images\" operations=\"compress\" quality=85")
+                    lines.append("")
+                    lines.append(f"# 批量调整尺寸")
+                    lines.append(f"python -m markflow.cli.commands execute {project_name} source_dir=\"./images\" operations=\"resize\" width=800 height=600")
+                    lines.append("")
+                    lines.append(f"# 批量添加水印")
+                    lines.append(f"python -m markflow.cli.commands execute {project_name} source_dir=\"./images\" operations=\"watermark\" watermark_text=\"2024 MarkFlow\"")
+
+                elif project_name == "image_viewer":
+                    lines.append(f"# 浏览图片目录")
+                    lines.append(f"python -m markflow.cli.commands execute {project_name} action=\"browse\" source_dir=\"./images\"")
+                    lines.append("")
+                    lines.append(f"# 幻灯片播放")
+                    lines.append(f"python -m markflow.cli.commands execute {project_name} action=\"slideshow\" source_dir=\"./images\" slideshow_interval=5")
+
+                elif project_name == "doc_generator":
+                    lines.append(f"# 生成 README")
+                    lines.append(f"python -m markflow.cli.commands execute {project_name} code_path=\"./skills/sd_image_generator/skill.py\" doc_type=\"readme\" project_name=\"sd_image_generator\"")
+
+                else:
+                    # 通用示例
+                    required = [inp for inp in inputs if inp.get('required', False)]
+                    if required:
+                        params_str = ' '.join([f"{inp['name']}=\"your_{inp['name']}\"" for inp in required])
+                        lines.append(f"python -m markflow.cli.commands execute {project_name} {params_str}")
+                    else:
+                        lines.append(f"python -m markflow.cli.commands execute {project_name}")
+
+            except Exception as e:
+                logger.warning(f"生成示例失败: {e}")
+                lines.append(f"python -m markflow.cli.commands execute {project_name} [参数]")
+        else:
+            lines.append(f"python -m markflow.cli.commands execute {project_name} [参数]")
+
+        lines.append("```")
+        lines.append("")
+        # ========== 修改结束 ==========
+
+        lines.append("查看完整参数说明：")
+        lines.append("")
+        lines.append("```bash")
+        lines.append(f"python -m markflow.cli.commands info {project_name}")
+        lines.append("```")
+        lines.append("")
+
+        # 输出位置
+        lines.append("## 输出位置")
+        lines.append("")
+        lines.append(f"生成的输出保存在 `skills/{project_name}/output/` 目录下。")
+        lines.append("")
+
         lines.append("---")
         lines.append("")
         lines.append(f"*文档自动生成于 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
-        
+
         return '\n'.join(lines)
     
     def _generate_usage_examples(self, parsed_files: List[Dict], project_name: str) -> str:
         """生成使用示例"""
         lines = []
-        
+
         lines.append(f"# {project_name} 使用示例")
         lines.append("")
         lines.append("以下是从代码中提取的使用示例：")
         lines.append("")
-        
+
         for file_info in parsed_files:
             module_name = file_info['module_name']
             lines.append(f"## {module_name}")
             lines.append("")
-            
+
             for cls in file_info['classes']:
                 lines.append(f"### {cls['name']}")
                 lines.append("")
-                
-                # 查找 __init__ 方法
+
                 init_method = None
                 for method in cls['methods']:
                     if method['name'] == '__init__':
                         init_method = method
                         break
-                
+
                 if init_method:
                     params = [p for p in init_method['params'] if p['name'] != 'self']
                     if params:
@@ -440,8 +575,7 @@ class DocGenerator:
                         lines.append(f"obj = {cls['name']}({param_str})")
                         lines.append("```")
                         lines.append("")
-                
-                # 其他方法
+
                 methods = [m for m in cls['methods'] if m['name'] not in ['__init__', '__repr__']]
                 if methods:
                     lines.append("```python")
@@ -456,17 +590,17 @@ class DocGenerator:
                             lines.append(f"# {method['docstring'][:60]}")
                     lines.append("```")
                 lines.append("")
-        
+
         return '\n'.join(lines)
-    
+
     def execute(self, **kwargs) -> Dict[str, Any]:
         """执行文档生成"""
         start_time = datetime.now()
         logger.info(f"执行技能: {self.name} (v{self.version})")
-        
+
         try:
             self._validate_inputs(**kwargs)
-            
+
             code_path = Path(kwargs.get('code_path'))
             doc_type = kwargs.get('doc_type', self.config.get('default_doc_type', 'all'))
             output_format = kwargs.get('output_format', self.config.get('default_format', 'md'))
@@ -477,31 +611,38 @@ class DocGenerator:
             extract_classes = kwargs.get('extract_classes', True)
             extract_functions = kwargs.get('extract_functions', True)
             generate_examples = kwargs.get('generate_examples', True)
-            
-            output_dir = Path(self.config.get('output_dir', './generated_docs'))
+
+            # 获取技能名称（用于确定输出位置）
+            skill_name = kwargs.get('skill_name_param', project_name)
+
+            # 如果指定了技能名称，输出到该技能的 output 目录
+            if skill_name:
+                output_dir = Path("./skills") / skill_name / "output"
+            else:
+                output_dir = Path(self.config.get('output_dir', './skills'))
+
             output_dir.mkdir(parents=True, exist_ok=True)
-            
+
             logger.info(f"扫描代码目录: {code_path}")
             files = self._collect_python_files(code_path)
-            
+
             if not files:
                 return {
                     "status": "error",
                     "error": f"未找到任何 Python 文件: {code_path}"
                 }
-            
+
             logger.info(f"找到 {len(files)} 个 Python 文件")
-            
+
             parsed_files = []
             for file_path in files:
                 logger.info(f"  解析: {file_path}")
                 parsed = self._parse_python_file(file_path)
                 parsed_files.append(parsed)
-            
-            # 生成文档
+
             results = {}
             saved_paths = []
-            
+
             if doc_type in ['api', 'all']:
                 api_doc = self._generate_api_doc_md(parsed_files, project_name, project_description)
                 api_path = output_dir / f"{project_name}_api_reference.{output_format}"
@@ -509,7 +650,7 @@ class DocGenerator:
                     f.write(api_doc)
                 saved_paths.append(str(api_path))
                 results['api_reference'] = api_doc
-            
+
             if doc_type in ['readme', 'all']:
                 readme_doc = self._generate_readme_md(parsed_files, project_name, project_description, author)
                 readme_path = output_dir / f"README.{output_format}"
@@ -517,7 +658,15 @@ class DocGenerator:
                     f.write(readme_doc)
                 saved_paths.append(str(readme_path))
                 results['readme'] = readme_doc
-            
+
+                # 同时复制一份到技能根目录
+                target_readme = Path("./skills") / skill_name / "README.md"
+                if target_readme.parent.exists():
+                    with open(target_readme, 'w', encoding='utf-8') as f:
+                        f.write(readme_doc)
+                    saved_paths.append(str(target_readme))
+                    logger.info(f"   README 已复制到: {target_readme}")
+
             if generate_examples:
                 examples_doc = self._generate_usage_examples(parsed_files, project_name)
                 examples_path = output_dir / f"{project_name}_examples.md"
@@ -525,12 +674,12 @@ class DocGenerator:
                     f.write(examples_doc)
                 saved_paths.append(str(examples_path))
                 results['usage_examples'] = examples_doc
-            
+
             generation_time = (datetime.now() - start_time).total_seconds()
-            
-            logger.info(f"✅ 文档生成完成! 保存位置: {output_dir}")
+
+            logger.info(f"文档生成完成! 保存位置: {output_dir}")
             logger.info(f"  耗时: {generation_time:.2f}s")
-            
+
             return {
                 "status": "success",
                 "result": {
@@ -553,7 +702,7 @@ class DocGenerator:
                     "executed_at": datetime.now().isoformat()
                 }
             }
-            
+
         except Exception as e:
             logger.error(f"执行失败: {e}")
             return {
@@ -562,6 +711,6 @@ class DocGenerator:
                 "skill": self.name,
                 "timestamp": datetime.now().isoformat()
             }
-    
+
     def __repr__(self):
         return f"<DocGenerator(name={self.name}, version={self.version})>"
