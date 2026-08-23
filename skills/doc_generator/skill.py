@@ -356,7 +356,7 @@ class DocGenerator:
 
     def _generate_readme_md(self, parsed_files: List[Dict], project_name: str,
                            project_description: str, author: str) -> str:
-        """生成 README 文档"""
+        """生成 README 文档 - 增强版"""
         lines = []
 
         # 标题
@@ -369,7 +369,7 @@ class DocGenerator:
             lines.append(f"**作者**: {author}")
             lines.append("")
 
-        # 概览 - 统计类和方法
+        # 概览
         total_classes = 0
         total_methods = 0
         total_functions = 0
@@ -387,6 +387,23 @@ class DocGenerator:
         lines.append(f"- **方法数**: {total_methods}")
         lines.append(f"- **函数数**: {total_functions}")
         lines.append("")
+
+        # ============ 新增：提取多语言支持信息 ============
+        if project_name == "code_reviewer":
+            supported_langs = self._extract_supported_languages_from_code(parsed_files)
+            if supported_langs:
+                lines.append("## 支持的语言")
+                lines.append("")
+                lines.append("| 语言 | 检查工具 | 状态 |")
+                lines.append("|------|----------|------|")
+                for lang, tools in supported_langs.items():
+                    tool_list = ", ".join(tools) if isinstance(tools, list) else str(tools)
+                    # 检查工具是否已安装
+                    installed = self._check_tools_installed(tools)
+                    status_icon = "✅" if installed else "⚠️ 需安装"
+                    lines.append(f"| {lang.upper()} | {tool_list} | {status_icon} |")
+                lines.append("")
+        # ============ 新增结束 ============
 
         # 从 meta.json 读取参数说明
         meta_file = Path(f"./skills/{project_name}/meta.json")
@@ -410,6 +427,24 @@ class DocGenerator:
                         lines.append(f"pip install {dep}")
                     lines.append("```")
                     lines.append("")
+
+                # ============ 新增：各语言依赖安装 ============
+                if project_name == "code_reviewer":
+                    lang_deps = self._get_language_install_commands()
+                    if lang_deps:
+                        lines.append("## 各语言依赖安装")
+                        lines.append("")
+                        for lang, cmds in lang_deps.items():
+                            if lang == "python":
+                                continue
+                            lines.append(f"### {lang.upper()}")
+                            lines.append("")
+                            lines.append("```bash")
+                            for cmd in cmds:
+                                lines.append(cmd)
+                            lines.append("```")
+                            lines.append("")
+                # ============ 新增结束 ============
 
                 # 参数说明
                 if meta.get('inputs'):
@@ -440,7 +475,6 @@ class DocGenerator:
             except Exception as e:
                 logger.warning(f"读取 meta.json 失败: {e}")
 
-        # ========== 修改这里 ==========
         # 使用方法
         lines.append("## 使用方法")
         lines.append("")
@@ -449,79 +483,46 @@ class DocGenerator:
         lines.append("```")
         lines.append("")
 
-        # 动态生成示例
+        # 示例
         lines.append("### 示例")
         lines.append("")
         lines.append("```bash")
 
-        meta_file = Path(f"./skills/{project_name}/meta.json")
-        if meta_file.exists():
-            try:
-                with open(meta_file, 'r', encoding='utf-8') as f:
-                    meta = json.load(f)
-
-                inputs = meta.get('inputs', [])
-
-                if project_name == "voice_assistant":
-                    lines.append(f"# TTS 文本转语音")
-                    lines.append(f"python -m markflow.cli.commands execute {project_name} action=\"tts\" text=\"你好，欢迎使用 MarkFlow\"")
-                    lines.append("")
-                    lines.append(f"# STT 语音识别")
-                    lines.append(f"python -m markflow.cli.commands execute {project_name} action=\"stt\" audio_file=\"./audio.mp3\"")
-                    lines.append("")
-                    lines.append(f"# 列出可用语音")
-                    lines.append(f"python -m markflow.cli.commands execute {project_name} action=\"list_voices\"")
-
-                elif project_name == "novel_writer":
-                    lines.append(f"# 首次生成小说")
-                    lines.append(f"python -m markflow.cli.commands execute {project_name} genre=\"科幻\" title=\"星际行者\" outline=\"探索宇宙\" chapter_count=3")
-                    lines.append("")
-                    lines.append(f"# 断点续写")
-                    lines.append(f"python -m markflow.cli.commands execute {project_name} genre=\"科幻\" title=\"星际行者\" chapter_count=6 continue_from=\"./novel.txt\"")
-
-                elif project_name == "sd_image_generator":
-                    lines.append(f"# 生成图片")
-                    lines.append(f"python -m markflow.cli.commands execute {project_name} prompt=\"a beautiful sunset\" model_name=\"sd-v1-5-tiny.safetensors\"")
-
-                elif project_name == "image_toolbox":
-                    lines.append(f"# 批量压缩图片")
-                    lines.append(f"python -m markflow.cli.commands execute {project_name} source_dir=\"./images\" operations=\"compress\" quality=85")
-                    lines.append("")
-                    lines.append(f"# 批量调整尺寸")
-                    lines.append(f"python -m markflow.cli.commands execute {project_name} source_dir=\"./images\" operations=\"resize\" width=800 height=600")
-                    lines.append("")
-                    lines.append(f"# 批量添加水印")
-                    lines.append(f"python -m markflow.cli.commands execute {project_name} source_dir=\"./images\" operations=\"watermark\" watermark_text=\"2024 MarkFlow\"")
-
-                elif project_name == "image_viewer":
-                    lines.append(f"# 浏览图片目录")
-                    lines.append(f"python -m markflow.cli.commands execute {project_name} action=\"browse\" source_dir=\"./images\"")
-                    lines.append("")
-                    lines.append(f"# 幻灯片播放")
-                    lines.append(f"python -m markflow.cli.commands execute {project_name} action=\"slideshow\" source_dir=\"./images\" slideshow_interval=5")
-
-                elif project_name == "doc_generator":
-                    lines.append(f"# 生成 README")
-                    lines.append(f"python -m markflow.cli.commands execute {project_name} code_path=\"./skills/sd_image_generator/skill.py\" doc_type=\"readme\" project_name=\"sd_image_generator\"")
-
-                else:
-                    # 通用示例
+        if project_name == "code_reviewer":
+            lines.append(f"# 自动检测并审查所有代码")
+            lines.append(f"python -m markflow.cli.commands execute {project_name} code_path=\"./project\"")
+            lines.append("")
+            lines.append(f"# 审查 Python 代码")
+            lines.append(f"python -m markflow.cli.commands execute {project_name} code_path=\"./markflow\"")
+            lines.append("")
+            lines.append(f"# 只检查安全问题")
+            lines.append(f"python -m markflow.cli.commands execute {project_name} code_path=\"./markflow\" focus=\"security\"")
+            lines.append("")
+            lines.append(f"# 指定 JavaScript 语言")
+            lines.append(f"python -m markflow.cli.commands execute {project_name} code_path=\"./project\" language=\"javascript\"")
+            lines.append("")
+            lines.append(f"# 深度审查")
+            lines.append(f"python -m markflow.cli.commands execute {project_name} code_path=\"./project\" review_level=\"deep\"")
+        else:
+            meta_file = Path(f"./skills/{project_name}/meta.json")
+            if meta_file.exists():
+                try:
+                    with open(meta_file, 'r', encoding='utf-8') as f:
+                        meta = json.load(f)
+                    inputs = meta.get('inputs', [])
                     required = [inp for inp in inputs if inp.get('required', False)]
                     if required:
                         params_str = ' '.join([f"{inp['name']}=\"your_{inp['name']}\"" for inp in required])
                         lines.append(f"python -m markflow.cli.commands execute {project_name} {params_str}")
                     else:
                         lines.append(f"python -m markflow.cli.commands execute {project_name}")
-
-            except Exception as e:
-                logger.warning(f"生成示例失败: {e}")
-                lines.append(f"python -m markflow.cli.commands execute {project_name} [参数]")
-        else:
-            lines.append(f"python -m markflow.cli.commands execute {project_name} [参数]")
+                except:
+                    lines.append(f"python -m markflow.cli.commands execute {project_name}")
+            else:
+                lines.append(f"python -m markflow.cli.commands execute {project_name}")
 
         lines.append("```")
         lines.append("")
-        # ========== 修改结束 ==========
 
         lines.append("查看完整参数说明：")
         lines.append("")
@@ -529,6 +530,25 @@ class DocGenerator:
         lines.append(f"python -m markflow.cli.commands info {project_name}")
         lines.append("```")
         lines.append("")
+
+        # 查看报告
+        if project_name == "code_reviewer":
+            lines.append("### 查看报告")
+            lines.append("")
+            lines.append("```bash")
+            lines.append("python -c \"")
+            lines.append("import json")
+            lines.append("from pathlib import Path")
+            lines.append("reports = list(Path('skills/code_reviewer/output').glob('review_*.json'))")
+            lines.append("if reports:")
+            lines.append("    latest = max(reports, key=lambda p: p.stat().st_mtime)")
+            lines.append("    data = json.load(open(latest))")
+            lines.append("    result = data.get('result', data)")
+            lines.append("    print(f'评分: {result.get(\\\"overall_score\\\", 0)}/100')")
+            lines.append("    print(f'问题: {result.get(\\\"issues_count\\\", 0)} 个')")
+            lines.append("\"")
+            lines.append("```")
+            lines.append("")
 
         # 输出位置
         lines.append("## 输出位置")
@@ -541,7 +561,129 @@ class DocGenerator:
         lines.append(f"*文档自动生成于 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
 
         return '\n'.join(lines)
-    
+        
+    def _extract_supported_languages_from_code(self, parsed_files: List[Dict]) -> Dict:
+        """从 code_reviewer/skill.py 中提取 SUPPORTED_LANGUAGES"""
+        import re
+        result = {}
+        
+        for file_info in parsed_files:
+            content = file_info.get('content', '')
+            
+            # 方法1: 匹配 SUPPORTED_LANGUAGES = { ... } 整个字典
+            pattern = r'SUPPORTED_LANGUAGES\s*=\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}'
+            match = re.search(pattern, content, re.DOTALL)
+            if match:
+                block = match.group(1)
+                # 匹配每个语言条目: "python": {"extensions": [...], "tools": [...]}
+                lang_pattern = r'"(\w+)"\s*:\s*\{[^}]*"tools"\s*:\s*\[([^\]]+)\]'
+                for m in re.finditer(lang_pattern, block):
+                    lang = m.group(1)
+                    tools_raw = m.group(2)
+                    # 解析工具列表，去掉引号和空格
+                    tools = [t.strip().strip('"').strip("'") for t in tools_raw.split(',') if t.strip()]
+                    result[lang] = tools
+                return result
+            
+            # 方法2: 如果上面的正则没匹配到，尝试更宽松的匹配
+            # 先找到 SUPPORTED_LANGUAGES 的位置
+            start_idx = content.find('SUPPORTED_LANGUAGES = {')
+            if start_idx == -1:
+                start_idx = content.find('SUPPORTED_LANGUAGES={')
+            if start_idx != -1:
+                # 从 SUPPORTED_LANGUAGES = { 开始，找到匹配的 }
+                brace_count = 0
+                in_string = False
+                escape = False
+                end_idx = start_idx
+                for i, ch in enumerate(content[start_idx:], start_idx):
+                    if escape:
+                        escape = False
+                        continue
+                    if ch == '\\':
+                        escape = True
+                        continue
+                    if ch == '"' or ch == "'":
+                        if not in_string:
+                            in_string = ch
+                        elif in_string == ch:
+                            in_string = False
+                        continue
+                    if in_string:
+                        continue
+                    if ch == '{':
+                        brace_count += 1
+                    elif ch == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            end_idx = i
+                            break
+                
+                if brace_count == 0:
+                    dict_str = content[start_idx:end_idx+1]
+                    # 提取每个语言
+                    lang_pattern = r'"(\w+)"\s*:\s*\{[^}]*"tools"\s*:\s*\[([^\]]+)\]'
+                    for m in re.finditer(lang_pattern, dict_str):
+                        lang = m.group(1)
+                        tools_raw = m.group(2)
+                        tools = [t.strip().strip('"').strip("'") for t in tools_raw.split(',') if t.strip()]
+                        result[lang] = tools
+                    return result
+        
+        return result
+        
+
+    def _check_tools_installed(self, tools: List[str]) -> bool:
+        """检查工具是否已安装（只检查 Python 工具）"""
+        import shutil
+        # 只有 Python 工具才真正检查
+        python_tools = ['pylint', 'flake8', 'bandit', 'radon']
+        for tool in tools:
+            if tool in python_tools:
+                if shutil.which(tool):
+                    return True
+        # 非 Python 工具默认返回 False（表示需安装）
+        return False
+        
+    def _get_language_install_commands(self) -> Dict:
+        """获取各语言的依赖安装命令"""
+        return {
+            "javascript": [
+                "npm install -g eslint"
+            ],
+            "java": [
+                "# 下载 checkstyle.jar 放到 lib/ 目录",
+                "curl -L -o lib/checkstyle.jar https://github.com/checkstyle/checkstyle/releases/download/checkstyle-10.12.0/checkstyle-10.12.0-all.jar",
+                "",
+                "# 下载 spotbugs.jar 放到 lib/ 目录",
+                "curl -L -o lib/spotbugs.jar https://github.com/spotbugs/spotbugs/releases/download/4.8.3/spotbugs-4.8.3.jar"
+            ],
+            "cpp": [
+                "# Windows",
+                "choco install cppcheck",
+                "",
+                "# Linux",
+                "sudo apt install cppcheck clang-tidy",
+                "",
+                "# macOS",
+                "brew install cppcheck"
+            ],
+            "go": [
+                "go install golang.org/x/lint/golint@latest",
+                "go install honnef.co/go/tools/cmd/staticcheck@latest"
+            ],
+            "rust": [
+                "rustup component add clippy"
+            ],
+            "android": [
+                "# 配置 ANDROID_HOME 环境变量",
+                "# 使用 Android Studio 自带的 lint 工具",
+                "",
+                "# 安装 ktlint (macOS)",
+                "brew install ktlint"
+            ]
+        }
+        
     def _generate_usage_examples(self, parsed_files: List[Dict], project_name: str) -> str:
         """生成使用示例"""
         lines = []

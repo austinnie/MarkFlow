@@ -20,10 +20,11 @@ MarkFlow 是一个轻量级的技能生成框架，让你用 **Markdown** 编写
 
 ## 📦 已安装技能
 
-共 **6** 个技能：
+共 **7** 个技能：
 
 | 技能 | 描述 | 版本 |
 |------|------|------|
+| `code_reviewer` | AI 代码审查，发现问题和安全风险 | 1.0.0 |
 | `doc_generator` | 代码文档自动生成器，从 Python 代码自动生成 API 文档 | 1.0.0 |
 | `image_toolbox` | 图片批量处理工具箱 | 1.0.0 |
 | `image_viewer` | 功能完整的图片查看器和管理器，替代 Windows 自带图片查看器 | 1.0.0 |
@@ -137,6 +138,11 @@ MarkFlow/
 │   ├── generate_skill_readme.py      # 技能 README 生成
 │   └── markflow_gui.py               # GUI 启动
 ├── skills/                           # 已安装的技能
+│   ├── code_reviewer/                 # 代码审查助手
+│   │   ├── skill.py              # 可执行代码
+│   │   ├── meta.json             # 元数据
+│   │   ├── skill.md              # 技能文档
+│   │   └── output/               # 输出目录
 │   ├── doc_generator/                 # doc_generator
 │   │   ├── skill.py              # 可执行代码
 │   │   ├── meta.json             # 元数据
@@ -291,6 +297,6 @@ python -m markflow.gui
 
 ---
 
-*文档自动生成于 2026-08-23 17:51:55*
+*文档自动生成于 2026-08-23 22:11:51*
 
 Made with ❤️ by MarkFlow Team
