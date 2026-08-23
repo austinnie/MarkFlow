@@ -404,7 +404,35 @@ class DocGenerator:
                     lines.append(f"| {lang.upper()} | {tool_list} | {status_icon} |")
                 lines.append("")
         # ============ 新增结束 ============
-
+        
+        # ============ music_player 特殊处理 ============
+        if project_name == "music_player":
+            lines.append("## 支持的功能")
+            lines.append("")
+            lines.append("| 功能 | 说明 |")
+            lines.append("|------|------|")
+            lines.append("| 🔍 搜索音乐 | 在线搜索 YouTube 音乐 |")
+            lines.append("| ▶️ 播放音乐 | 自动选择播放器（Moo0/VLC/浏览器） |")
+            lines.append("| 🎵 智能歌单 | 根据情绪生成播放列表 |")
+            lines.append("| 💾 保存歌单 | 保存播放列表到本地 |")
+            lines.append("| 📋 歌词显示 | 显示当前歌曲歌词 |")
+            lines.append("| 📊 播放控制 | 暂停/继续/停止/上一首/下一首 |")
+            lines.append("| 🔊 音量控制 | 调节播放音量 |")
+            lines.append("| 📁 本地扫描 | 扫描本地音乐文件 |")
+            lines.append("")
+            
+            lines.append("## 播放器支持")
+            lines.append("")
+            lines.append("| 播放器 | 本地文件 | 在线音乐 | 说明 |")
+            lines.append("|--------|----------|----------|------|")
+            lines.append("| Moo0 AudioPlayer | ✅ | ❌ | 轻量稳定，优先用于本地 |")
+            lines.append("| 浏览器 | ❌ | ✅ | 在线音乐主要播放方式 |")
+            lines.append("| VLC | ✅ | ⚠️ | 作为备选 |")
+            lines.append("| 系统播放器 | ✅ | ❌ | 最后备选 |")
+            lines.append("| mpv | ✅ | ✅ | 最后备选 |")
+            lines.append("")        
+        # ============ 新增结束 ============
+        
         # 从 meta.json 读取参数说明
         meta_file = Path(f"./skills/{project_name}/meta.json")
         if meta_file.exists():
@@ -503,6 +531,23 @@ class DocGenerator:
             lines.append("")
             lines.append(f"# 深度审查")
             lines.append(f"python -m markflow.cli.commands execute {project_name} code_path=\"./project\" review_level=\"deep\"")
+
+        elif project_name == "music_player":
+            lines.append(f"# 搜索并播放音乐")
+            lines.append(f"python -m markflow.cli.commands execute {project_name} action=\"play\" query=\"周杰伦 稻香\"")
+            lines.append("")
+            lines.append(f"# 生成开心歌单")
+            lines.append(f"python -m markflow.cli.commands execute {project_name} action=\"playlist\" mood=\"happy\" count=5")
+            lines.append("")
+            lines.append(f"# 保存歌单")
+            lines.append(f"python -m markflow.cli.commands execute {project_name} action=\"playlist\" mood=\"relax\" save=true")
+            lines.append("")
+            lines.append(f"# 扫描本地音乐")
+            lines.append(f"python -m markflow.cli.commands execute {project_name} action=\"scan\"")
+            lines.append("")
+            lines.append(f"# 查看播放状态")
+            lines.append(f"python -m markflow.cli.commands execute {project_name} action=\"info\"")
+            
         else:
             meta_file = Path(f"./skills/{project_name}/meta.json")
             if meta_file.exists():
@@ -549,7 +594,15 @@ class DocGenerator:
             lines.append("\"")
             lines.append("```")
             lines.append("")
-
+            
+        elif project_name == "music_player":
+            lines.append("### 查看播放列表")
+            lines.append("")
+            lines.append("```bash")
+            lines.append(f"python -m markflow.cli.commands execute {project_name} action=\"info\"")
+            lines.append("```")
+            lines.append("")
+            
         # 输出位置
         lines.append("## 输出位置")
         lines.append("")
