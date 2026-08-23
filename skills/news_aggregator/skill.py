@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
 
@@ -44,39 +45,61 @@ class NewsAggregator:
     """
     
     DEFAULT_FEEDS = {
-        # ==================== 科技 ====================
-        "tech": [
-            # 国际科技
-            "https://feeds.feedburner.com/TechCrunch",
-            "https://www.theverge.com/rss/index.xml",
-            "https://hnrss.org/frontpage",
-            "https://www.wired.com/feed/rss",
-            "https://arstechnica.com/feed/",
-            "https://techcrunch.com/feed/",
-            "https://www.engadget.com/rss.xml",
-            "https://www.cnet.com/rss/news/",
-            "https://www.zdnet.com/news/rss.xml",
-            "https://www.theguardian.com/uk/technology/rss",
-            # 中国科技
+        # ==================== 日本 ====================
+        "japan": [
+            "https://www3.nhk.or.jp/rss/news/cat0.xml",
+            "https://www.nikkei.com/feed/rss",
+            "https://www.japantimes.co.jp/rss/news.xml",
+            "https://www.asahi.com/rss/asahi/newsheadlines.rdf",
+            "https://mainichi.jp/rss/news/headlines.rss",
+            "https://rsshub.app/nhk/news",
+            "https://rsshub.app/nikkei/news",
+            "https://rsshub.app/yomiuri/1",
+            "https://rsshub.app/itmedia/news",
+            "https://rsshub.app/ascii/1",
+        ],
+        
+        # ==================== 中国 ====================
+        "china": [
+            "https://feeds.bbci.co.uk/zhongwen/simp/rss.xml",
+            "https://rsshub.app/zaobao/realtime/china",
             "https://rsshub.app/ithome/1",
             "https://rsshub.app/36kr/newsflashes",
             "https://rsshub.app/sspai/series",
-            "https://rsshub.app/geekbang/news",
-            "https://rsshub.app/pingcn/1",
-            "https://rsshub.app/huxiu/index",
-            "https://rsshub.app/ifanr/latest",
-            # 日本科技
-            "https://rsshub.app/nikkei/news/tech",
-            "https://rsshub.app/ascii/1",
-            "https://rsshub.app/itmedia/news",
-            # 韩国科技
+            "https://rsshub.app/xinhuanet/1",
+            "https://rsshub.app/people/1",
+            "https://rsshub.app/zaobao/finance",
+            "https://rsshub.app/caijing/1",
+        ],
+        
+        # ==================== 韩国 ====================
+        "korea": [
+            "http://www.koreatimes.co.kr/rss/",
+            "https://www.koreaherald.com/rss/herald.xml",
+            "https://rsshub.app/yonhap/news",
+            "https://rsshub.app/hani/1",
+            "https://rsshub.app/koreaherald/news",
             "https://rsshub.app/zdnetkorea/news",
             "https://rsshub.app/etnews/1",
         ],
         
-        # ==================== 经济/财经 ====================
+        # ==================== 科技 ====================
+        "tech": [
+            "https://feeds.feedburner.com/TechCrunch",
+            "https://www.theverge.com/rss/index.xml",
+            "https://hnrss.org/frontpage",
+            "https://arstechnica.com/feed/",
+            "https://techcrunch.com/feed/",
+            "https://www.wired.com/feed/rss",
+            "https://www.cnet.com/rss/news/",
+            "https://www.zdnet.com/news/rss.xml",
+            "https://www.theguardian.com/uk/technology/rss",
+            "https://feeds.feedburner.com/venturebeat/SZYF",
+            "https://www.engadget.com/rss.xml",
+        ],
+        
+        # ==================== 财经 ====================
         "business": [
-            # 国际财经
             "https://www.bloomberg.com/feed/podcast",
             "https://www.ft.com/?format=rss",
             "https://www.wsj.com/xml/rss/3_7085.xml",
@@ -85,23 +108,10 @@ class NewsAggregator:
             "https://www.cnbc.com/id/100003114/device/rss/rss.html",
             "https://www.marketwatch.com/rss/topstories",
             "https://www.barrons.com/feed",
-            # 中国财经
-            "https://rsshub.app/zaobao/finance",
-            "https://rsshub.app/caijing/1",
-            "https://rsshub.app/jrj/news",
-            "https://rsshub.app/eastmoney/1",
-            "https://rsshub.app/yicai/news",
-            # 日本财经
-            "https://rsshub.app/nikkei/news/business",
-            "https://rsshub.app/jp.reuters/business",
-            # 韩国财经
-            "https://rsshub.app/koreatimes/business",
-            "https://rsshub.app/youthdaily/economic",
         ],
         
         # ==================== 国际新闻 ====================
         "world": [
-            # 国际综合
             "https://feeds.bbci.co.uk/news/world/rss.xml",
             "https://www.npr.org/rss/rss.php?id=1001",
             "https://feeds.reuters.com/reuters/worldNews",
@@ -109,38 +119,6 @@ class NewsAggregator:
             "https://www.aljazeera.com/xml/rss.xml",
             "https://www.dw.com/en/rss.xml",
             "https://www.france24.com/en/rss",
-            # 中国新闻
-            "https://rsshub.app/zaobao/realtime/china",
-            "https://rsshub.app/xinhuanet/1",
-            "https://rsshub.app/people/1",
-            # 美国新闻
-            "https://rsshub.app/nytimes/world",
-            "https://rsshub.app/washingtonpost/world",
-            "https://rsshub.app/usatoday/news",
-            # 日本新闻
-            "https://rsshub.app/nikkei/news",
-            "https://rsshub.app/nhk/news",
-            "https://rsshub.app/yomiuri/1",
-            # 韩国新闻
-            "https://rsshub.app/yonhap/news",
-            "https://rsshub.app/hani/1",
-            "https://rsshub.app/koreaherald/news",
-        ],
-        
-        # ==================== 中国 ====================
-        "china": [
-            "https://rsshub.app/zaobao/realtime/china",
-            "https://rsshub.app/ithome/1",
-            "https://rsshub.app/36kr/newsflashes",
-            "https://rsshub.app/sspai/series",
-            "https://rsshub.app/geekbang/news",
-            "https://rsshub.app/pingcn/1",
-            "https://rsshub.app/huxiu/index",
-            "https://rsshub.app/ifanr/latest",
-            "https://rsshub.app/zaobao/finance",
-            "https://rsshub.app/caijing/1",
-            "https://rsshub.app/xinhuanet/1",
-            "https://rsshub.app/people/1",
         ],
         
         # ==================== 美国 ====================
@@ -154,34 +132,18 @@ class NewsAggregator:
             "https://www.cnet.com/rss/news/",
             "https://www.zdnet.com/news/rss.xml",
             "https://apnews.com/world-news.rss",
-            "https://rsshub.app/nytimes/world",
-            "https://rsshub.app/washingtonpost/world",
-            "https://rsshub.app/usatoday/news",
-            "https://www.cnbc.com/id/100003114/device/rss/rss.html",
-            "https://www.marketwatch.com/rss/topstories",
         ],
-        
-        # ==================== 日本 ====================
-        "japan": [
-            "https://rsshub.app/nikkei/news/tech",
-            "https://rsshub.app/nikkei/news/business",
-            "https://rsshub.app/nikkei/news",
-            "https://rsshub.app/nhk/news",
-            "https://rsshub.app/yomiuri/1",
-            "https://rsshub.app/ascii/1",
-            "https://rsshub.app/itmedia/news",
-            "https://rsshub.app/jp.reuters/business",
-        ],
-        
-        # ==================== 韩国 ====================
-        "korea": [
-            "https://rsshub.app/zdnetkorea/news",
-            "https://rsshub.app/etnews/1",
-            "https://rsshub.app/koreatimes/business",
-            "https://rsshub.app/yonhap/news",
-            "https://rsshub.app/hani/1",
-            "https://rsshub.app/koreaherald/news",
-        ],
+    }
+    
+    # 分类名称映射
+    CATEGORY_NAMES = {
+        "tech": "科技",
+        "business": "财经",
+        "world": "国际",
+        "china": "中国",
+        "usa": "美国",
+        "japan": "日本",
+        "korea": "韩国",
     }
     
     def __init__(self, config: Dict[str, Any] = None):
@@ -205,16 +167,122 @@ class NewsAggregator:
     
     def _setup_config(self):
         defaults = {
+            # ===== 输出配置 =====
             "output_dir": "./skills/news_aggregator/output",
-            "top_n": 10,
-            "summary_length": 150,
+            "save_report": True,
+            "report_name_template": "news_{category}_{timestamp}.txt",
+            
+            # ===== RSS 抓取配置 =====
+            "feed_timeout": 10,
+            "max_workers": 10,
+            
+            # ===== AI 摘要配置 =====
+            "ai_model": "qwen2.5:3b",
+            "ollama_url": "http://localhost:11434",
+            "ai_temperature": 0.3,
+            "ai_timeout": 120,
+            "ai_summary_max_articles": 50,
+            
+            # ===== 新闻处理配置 =====
+            "top_n": 50,
+            "summary_length": 500,
+            "dedup_key_length": 30,
+            
+            # ===== 缓存配置 =====
             "cache_ttl": 1800,
+            "cache_enabled": True,
+            "cache_dir": ".feed_cache",
+            
+            # ===== 源验证配置 =====
+            "validate_feeds": True,
+            
+            # ===== 报告配置 =====
+            "report_date_format": "%Y-%m-%d %H:%M:%S",
+            "report_separator_length": 60,
+            
+            # ===== 日志配置 =====
+            "log_level": "INFO",
         }
         for key, value in defaults.items():
             if key not in self.config:
                 self.config[key] = value
         
         Path(self.config["output_dir"]).mkdir(parents=True, exist_ok=True)
+        self._init_cache_dir()
+    
+    def _init_cache_dir(self):
+        """初始化缓存目录"""
+        cache_dir_name = self.config.get("cache_dir", ".feed_cache")
+        self.cache_dir = Path(self.config["output_dir"]) / cache_dir_name
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+    
+    def _validate_feeds(self, feeds: List[str]) -> List[str]:
+        """验证 RSS 源是否可用"""
+        if not feeds:
+            return []
+        
+        valid_feeds = []
+        total = len(feeds)
+        timeout = self.config.get("feed_timeout", 10)
+        max_workers = self.config.get("max_workers", 10)
+        
+        logger.info(f"正在验证 {total} 个 RSS 源...")
+        
+        def check_feed(feed_url):
+            try:
+                import feedparser
+                feed = feedparser.parse(feed_url)
+                if feed.entries and len(feed.entries) > 0:
+                    return feed_url
+                return None
+            except Exception:
+                return None
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(check_feed, url): url for url in feeds}
+            for future in as_completed(futures):
+                url = futures[future]
+                result = future.result()
+                if result:
+                    valid_feeds.append(result)
+                    logger.debug(f"   ✅ {url[:60]}...")
+                else:
+                    logger.debug(f"   ❌ {url[:60]}...")
+        
+        logger.info(f"验证完成: {len(valid_feeds)}/{total} 个源可用")
+        return valid_feeds
+    
+    def _get_cached_feeds(self, category: str) -> Optional[List[str]]:
+        """获取缓存的可用源"""
+        if not self.config.get("cache_enabled", True):
+            return None
+        
+        cache_file = self.cache_dir / f"{category}.json"
+        if cache_file.exists():
+            try:
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    cache_ttl = self.config.get("cache_ttl", 1800)
+                    if time.time() - data.get("timestamp", 0) < cache_ttl:
+                        return data.get("feeds", [])
+            except:
+                pass
+        return None
+    
+    def _save_feed_cache(self, category: str, feeds: List[str]):
+        """保存缓存的可用源"""
+        if not self.config.get("cache_enabled", True):
+            return
+        
+        cache_file = self.cache_dir / f"{category}.json"
+        try:
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump({
+                    "timestamp": time.time(),
+                    "feeds": feeds
+                }, f, ensure_ascii=False, indent=2)
+        except:
+            pass
     
     def _validate_inputs(self, **kwargs) -> bool:
         sources = kwargs.get("sources")
@@ -223,13 +291,19 @@ class NewsAggregator:
             raise ValueError("请指定 sources 或 category 参数")
         return True
     
-    def _load_feeds(self, category: str = None, sources: str = None) -> List[str]:
-        """加载 RSS 源"""
+    def _load_feeds(self, category: str = None, sources: str = None, validate: bool = True) -> List[str]:
+        """加载 RSS 源（带验证和缓存）"""
         feeds = []
         
-        if category and category in self.DEFAULT_FEEDS:
-            return self.DEFAULT_FEEDS[category]
+        # 从分类加载
+        if category:
+            if category in self.DEFAULT_FEEDS:
+                feeds = self.DEFAULT_FEEDS[category].copy()
+            else:
+                logger.warning(f"未知分类: {category}")
+                return []
         
+        # 从自定义源加载
         if sources:
             source_list = [s.strip() for s in sources.split(',')]
             for feed_list in self.DEFAULT_FEEDS.values():
@@ -237,14 +311,35 @@ class NewsAggregator:
                     for src in source_list:
                         if src.lower() in feed.lower():
                             feeds.append(feed)
-            return feeds
         
-        for feed_list in self.DEFAULT_FEEDS.values():
-            feeds.extend(feed_list)
+        # 如果没有指定分类和源，返回所有
+        if not feeds and not sources:
+            for feed_list in self.DEFAULT_FEEDS.values():
+                feeds.extend(feed_list)
+        
+        # 去重
+        feeds = list(set(feeds))
+        
+        # 验证源
+        if validate and self.config.get("validate_feeds", True):
+            # 尝试从缓存加载
+            if category:
+                cached = self._get_cached_feeds(category)
+                if cached:
+                    logger.info(f"使用缓存: {len(cached)} 个源")
+                    return cached
+            
+            feeds = self._validate_feeds(feeds)
+            
+            # 保存缓存
+            if category:
+                self._save_feed_cache(category, feeds)
+        
+        logger.info(f"加载 {len(feeds)} 个 RSS 源")
         return feeds
     
     def _fetch_feed(self, feed_url: str) -> List[Dict]:
-        """抓取单个 RSS 源"""
+        """抓取单个 RSS 源 - 抓取全部"""
         try:
             if not FEEDPARSER_AVAILABLE:
                 return []
@@ -252,11 +347,12 @@ class NewsAggregator:
             feed = feedparser.parse(feed_url)
             items = []
             
-            for entry in feed.entries[:20]:
+            # 不限制，全部抓取
+            for entry in feed.entries:
                 summary = entry.get("summary", "")
                 if summary:
                     summary = re.sub(r'<[^>]+>', '', summary)
-                    summary = summary[:300]
+                    # 不截断，保留完整
                 
                 published = entry.get("published") or entry.get("updated", "")
                 author = entry.get("author", "")
@@ -289,8 +385,10 @@ class NewsAggregator:
         """去重"""
         seen = set()
         unique = []
+        dedup_key_length = self.config.get("dedup_key_length", 30)
+        
         for item in items:
-            key = item.get("title", "")[:30].lower().strip()
+            key = item.get("title", "")[:dedup_key_length].lower().strip()
             if key and key not in seen:
                 seen.add(key)
                 unique.append(item)
@@ -304,34 +402,43 @@ class NewsAggregator:
         try:
             import requests
             
+            max_articles = self.config.get("ai_summary_max_articles", 50)
+            temperature = self.config.get("ai_temperature", 0.3)
+            timeout = self.config.get("ai_timeout", 120)
+            model = self.config.get("ai_model", "qwen2.5:3b")
+            ollama_url = self.config.get("ollama_url", "http://localhost:11434")
+            
             news_text = ""
-            for i, article in enumerate(articles[:10]):
+            for i, article in enumerate(articles[:max_articles]):
+                summary = article.get("summary", "")
+                if len(summary) > 200:
+                    summary = summary[:200] + "..."
                 news_text += f"{i+1}. {article['title']}\n"
-                news_text += f"   {article['summary'][:150]}\n"
+                news_text += f"   {summary}\n"
                 news_text += f"   来源: {article['source']}\n\n"
             
             prompt = f"""请根据以下新闻内容，生成一份每日新闻简报摘要。
 
 要求：
-1. 按类别整理
-2. 每类列出最重要的 2-3 条新闻
-3. 每条新闻用一句话概括
+1. 按主题/类别整理
+2. 列出最重要的新闻
+3. 每条新闻用一句话概括核心内容
 4. 格式简洁清晰
 
 新闻列表：
 {news_text}
 
-请生成每日新闻简报："""
-
+请生成每日新闻简报摘要："""
+            
             response = requests.post(
-                "http://localhost:11434/api/generate",
+                f"{ollama_url}/api/generate",
                 json={
-                    "model": "qwen2.5:7b",
+                    "model": model,
                     "prompt": prompt,
                     "stream": False,
-                    "options": {"temperature": 0.3}
+                    "options": {"temperature": temperature}
                 },
-                timeout=120
+                timeout=timeout
             )
             
             if response.status_code == 200:
@@ -344,24 +451,29 @@ class NewsAggregator:
             logger.warning(f"AI 摘要生成失败: {e}")
             return f"AI 摘要生成失败: {str(e)}"
     
-    def _generate_report(self, articles: List[Dict], category: str = None) -> str:
+    def _generate_report(self, articles: List[Dict], category: str = None, full: bool = True) -> str:
         """生成新闻报告"""
+        sep_len = self.config.get("report_separator_length", 60)
+        sep = "=" * sep_len
+        date_format = self.config.get("report_date_format", "%Y-%m-%d %H:%M:%S")
+        
         lines = []
-        lines.append("=" * 60)
+        lines.append(sep)
         lines.append("   📰 每日新闻简报")
-        lines.append("=" * 60)
-        lines.append(f"   生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        lines.append(sep)
+        lines.append(f"   生成时间: {datetime.now().strftime(date_format)}")
         if category:
-            lines.append(f"   分类: {category}")
+            category_name = self.CATEGORY_NAMES.get(category, category)
+            lines.append(f"   分类: {category_name}")
         lines.append(f"   新闻数: {len(articles)} 条")
-        lines.append("=" * 60)
+        lines.append(sep)
         lines.append("")
         
         if not articles:
             lines.append("暂无新闻")
             return "\n".join(lines)
         
-        # AI 摘要（失败时跳过）
+        # AI 摘要
         lines.append("【AI 智能摘要】")
         lines.append("-" * 40)
         try:
@@ -370,44 +482,44 @@ class NewsAggregator:
         except Exception as e:
             logger.warning(f"AI 摘要生成失败，跳过: {e}")
             lines.append("（AI 摘要暂时不可用，请检查 Ollama 服务）")
-    
+        
         lines.append("")
         lines.append("-" * 60)
         lines.append("")
         
-        # 按来源分组
-        sources = {}
-        for article in articles:
+        # 完整显示所有新闻
+        for i, article in enumerate(articles, 1):
+            title = article.get("title", "无标题")
+            summary = article.get("summary", "")
             source = article.get("source", "未知")
-            if source not in sources:
-                sources[source] = []
-            sources[source].append(article)
-        
-        for source, items in sorted(sources.items()):
-            lines.append(f"📌 {source} ({len(items)} 条)")
-            lines.append("-" * 40)
-            for item in items[:5]:
-                lines.append(f"  • {item.get('title', '无标题')}")
-                if item.get('summary'):
-                    lines.append(f"    {item['summary'][:120]}...")
-                if item.get('link'):
-                    lines.append(f"    🔗 {item['link']}")
-                lines.append("")
-            if len(items) > 5:
-                lines.append(f"  ... 还有 {len(items) - 5} 条")
+            link = article.get("link", "")
+            published = article.get("published", "")
+            
+            lines.append(f"【{i}】{title}")
+            if published:
+                lines.append(f"  时间: {published}")
+            lines.append(f"  来源: {source}")
+            if summary:
+                lines.append(f"  摘要: {summary}")
+            if link:
+                lines.append(f"  链接: {link}")
             lines.append("")
         
-        lines.append("=" * 60)
+        lines.append(sep)
         lines.append("   简报结束")
-        lines.append("=" * 60)
+        lines.append(sep)
         
         return "\n".join(lines)
     
     def _save_report(self, content: str, category: str = None) -> Path:
         """保存报告"""
+        if not self.config.get("save_report", True):
+            return None
+        
         output_dir = Path(self.config["output_dir"])
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        name = f"news_{category if category else 'all'}_{timestamp}.txt"
+        template = self.config.get("report_name_template", "news_{category}_{timestamp}.txt")
+        name = template.format(category=category if category else "all", timestamp=timestamp)
         file_path = output_dir / name
         
         with open(file_path, 'w', encoding='utf-8') as f:
@@ -425,14 +537,14 @@ class NewsAggregator:
             
             sources = kwargs.get("sources", "")
             category = kwargs.get("category", "")
-            top_n = kwargs.get("top_n", self.config.get("top_n", 10))
+            top_n = kwargs.get("top_n", self.config.get("top_n", 50))
+            validate = kwargs.get("validate", self.config.get("validate_feeds", True))
             
-            # 加载 RSS 源
-            feeds = self._load_feeds(category, sources)
-            logger.info(f"加载 {len(feeds)} 个 RSS 源")
+            # 加载 RSS 源（带验证）
+            feeds = self._load_feeds(category, sources, validate)
             
             if not feeds:
-                return {"status": "error", "error": "未找到 RSS 源"}
+                return {"status": "error", "error": "未找到可用的 RSS 源"}
             
             # 抓取新闻
             logger.info("抓取新闻...")
@@ -447,29 +559,33 @@ class NewsAggregator:
             unique_items = self._deduplicate(all_items)
             logger.info(f"去重后 {len(unique_items)} 条")
             
-            # 限制数量
+            # 限制数量（语音播报用前 top_n 条）
             top_n = min(top_n, len(unique_items))
             top_items = unique_items[:top_n]
             
-            # 生成报告
-            report_content = self._generate_report(top_items, category)
+            # 生成完整报告（全部新闻）
+            report_content = self._generate_report(unique_items, category, full=True)
             report_file = self._save_report(report_content, category)
             
-            logger.info(f"报告已保存: {report_file}")
+            result_data = {
+                "total_fetched": len(all_items),
+                "unique_count": len(unique_items),
+                "display_count": len(top_items),
+                "feeds_count": len(feeds),
+                "articles": top_items,           # 语音播报用前 top_n 条
+                "all_articles": unique_items,    # 全部新闻
+                "report": report_content,
+                "category": category or "all",
+                "generated_at": datetime.now().isoformat()
+            }
+            
+            if report_file:
+                result_data["report_file"] = str(report_file)
+                logger.info(f"报告已保存: {report_file}")
             
             return {
                 "status": "success",
-                "result": {
-                    "total_fetched": len(all_items),
-                    "unique_count": len(unique_items),
-                    "display_count": len(top_items),
-                    "feeds_count": len(feeds),
-                    "articles": top_items,
-                    "report": report_content,
-                    "report_file": str(report_file),
-                    "category": category or "all",
-                    "generated_at": datetime.now().isoformat()
-                },
+                "result": result_data,
                 "metadata": {
                     "skill": self.name,
                     "version": self.version,

@@ -4,11 +4,10 @@
 新闻播报工具 - 生成和播放
 
 用法：
-  python scripts/news_all_categories.py              # 生成所有分类（不播放）
-  python scripts/news_all_categories.py --play       # 生成所有分类并播放
-  python scripts/news_all_categories.py --play-only  # 只播放已生成的（不生成）
-  python scripts/news_all_categories.py --category tech --play  # 只生成并播放 tech
-  python scripts/news_all_categories.py --category tech --play-only  # 只播放 tech
+  python scripts/news_all_categories.py                    # 生成所有分类（不播放）
+  python scripts/news_all_categories.py --play             # 生成所有分类并播放
+  python scripts/news_all_categories.py --play-only        # 只播放已生成的（不生成）
+  python scripts/news_all_categories.py --top 50           # 每个分类取 50 条
 """
 
 import sys
@@ -19,7 +18,7 @@ import subprocess
 project_root = Path(__file__).parent.parent
 
 CATEGORIES = ["tech", "business", "world", "china", "usa", "japan", "korea"]
-TOP_N = 5
+TOP_N = 100
 
 
 def get_latest_audio(category: str) -> Path:
@@ -27,9 +26,16 @@ def get_latest_audio(category: str) -> Path:
     audio_dir = project_root / "news_broadcast" / "audio"
     if not audio_dir.exists():
         return None
+    
     files = sorted(audio_dir.glob(f"*{category}*.mp3"),
                   key=lambda p: p.stat().st_mtime, reverse=True)
-    return files[0] if files else None
+    
+    if not files:
+        all_files = sorted(audio_dir.glob("*.mp3"),
+                          key=lambda p: p.stat().st_mtime, reverse=True)
+        return all_files[0] if all_files else None
+    
+    return files[0]
 
 
 def play_audio(audio_path: Path) -> bool:
@@ -63,7 +69,7 @@ def play_category(category: str) -> bool:
     if audio:
         return play_audio(audio)
     else:
-        print(f"❌ 未找到 {category} 的音频，请先生成")
+        print(f"⚠️ 未找到 {category} 的音频")
         return False
 
 
@@ -76,7 +82,7 @@ def main():
     parser.add_argument("--category", "-c", default=None,
                         help="指定分类 (不指定则处理所有)")
     parser.add_argument("--top", "-t", type=int, default=TOP_N,
-                        help="每个分类取几条 (默认: 5)")
+                        help="每个分类取几条 (默认: 50)")
 
     args = parser.parse_args()
 
@@ -89,9 +95,11 @@ def main():
         print(f"📋 分类: {', '.join(categories)}")
         print("=" * 60)
 
+        played = 0
         for category in categories:
-            play_category(category)
-        print("\n✅ 播放完成")
+            if play_category(category):
+                played += 1
+        print(f"\n✅ 播放完成: {played}/{len(categories)}")
         return
 
     # ========== 模式2: 生成（带或不带播放） ==========
@@ -124,7 +132,7 @@ def main():
     print(f"🎵 音频: news_broadcast/audio/")
     print("=" * 60)
 
-    # 如果需要播放
+    # ========== 播放 ==========
     if args.play and audio_files:
         print("\n🎵 开始播放...")
         for category, audio in audio_files:

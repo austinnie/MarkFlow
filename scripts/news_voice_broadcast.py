@@ -9,6 +9,7 @@
   python scripts/news_voice_broadcast.py --top 3            # 只播报3条
   python scripts/news_voice_broadcast.py --play             # 合成后播放
   python scripts/news_voice_broadcast.py --output daily.mp3 # 指定输出文件
+  python scripts/news_voice_broadcast.py --chunk-size 10000 # 指定每段最大字符数
 """
 
 import sys
@@ -29,7 +30,7 @@ class NewsVoiceBroadcast:
     """新闻语音播报器 - 使用 news_aggregator + voice_assistant"""
     
     def __init__(self):
-        # ✅ 统一输出目录
+        # 统一输出目录
         self.news_dir = project_root / "news_broadcast"
         self.report_dir = self.news_dir / "reports"
         self.audio_dir = self.news_dir / "audio"
@@ -60,7 +61,8 @@ class NewsVoiceBroadcast:
             if result and result.get("status") == "success":
                 result_data = result.get("result", {})
                 articles = result_data.get("articles", [])
-                print(f"✅ 抓取到 {len(articles)} 条新闻")
+                total = result_data.get("unique_count", 0)
+                print(f"✅ 抓取到 {total} 条新闻，取前 {len(articles)} 条播报")
                 return articles
             else:
                 print(f"❌ 抓取失败: {result}")
@@ -76,6 +78,7 @@ class NewsVoiceBroadcast:
         lines = []
         
         lines.append(f"欢迎收听 {category_name} 新闻简报。")
+        lines.append(f"共 {len(news_list)} 条新闻。")
         lines.append("")
         
         for i, news in enumerate(news_list, 1):
@@ -88,7 +91,9 @@ class NewsVoiceBroadcast:
             
             lines.append(f"新闻 {i}：{title}")
             if summary and len(summary) > 20:
-                lines.append(f"摘要：{summary[:150]}")
+                # 语音播报摘要截取 200 字符（太长会影响体验）
+                summary_text = summary[:200] + "..." if len(summary) > 200 else summary
+                lines.append(f"摘要：{summary_text}")
             lines.append(f"来源：{source}")
             lines.append("")
         
@@ -103,26 +108,34 @@ class NewsVoiceBroadcast:
         with open(report_file, 'w', encoding='utf-8') as f:
             f.write(text)
         return report_file
-    
-    def _text_to_speech(self, text: str, output_file: str = None) -> str:
+        
+    def _text_to_speech(self, text: str, category: str, output_file: str = None, chunk_size: int = None) -> str:
         """调用 voice_assistant 合成语音，输出到统一目录"""
         if not output_file:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_file = f"news_broadcast_{timestamp}.mp3"
+            output_file = f"news_{category}_{timestamp}.mp3"
         
         output_path = self.audio_dir / output_file
         
         print(f"🔊 正在合成语音: {output_path.name}")
         
         try:
-            result = execute_skill(
-                "voice_assistant",
-                action="tts",
-                text=text,
-                voice="zh-CN-XiaoxiaoNeural",
-                speed=1.0,
-                output_file=str(output_path)
-            )
+            # 构建参数
+            kwargs = {
+                "action": "tts",
+                "text": text,
+                "voice": "zh-CN-XiaoxiaoNeural",
+                "speed": 1.0,
+                "output_file": str(output_path)
+            }
+            
+            # 如果指定了 chunk_size，传递给 voice_assistant
+            if chunk_size is not None:
+                kwargs["chunk_size"] = chunk_size
+                kwargs["auto_split"] = False
+                print(f"   📏 使用自定义 chunk_size: {chunk_size}")
+            
+            result = execute_skill("voice_assistant", **kwargs)
             
             if result and result.get("status") == "success":
                 result_data = result.get("result", {})
@@ -136,7 +149,7 @@ class NewsVoiceBroadcast:
         except Exception as e:
             print(f"❌ 语音合成异常: {e}")
             return None
-    
+        
     def _play_audio(self, audio_path: str):
         """使用 music_player 播放音频"""
         if not audio_path or not Path(audio_path).exists():
@@ -160,9 +173,9 @@ class NewsVoiceBroadcast:
         except Exception as e:
             print(f"❌ 播放异常: {e}")
     
-    def run(self, category: str = "tech", top_n: int = 5, 
+    def run(self, category: str = "tech", top_n: int = 50, 
             output_file: str = None, play: bool = False, 
-            save_text: bool = False):
+            save_text: bool = False, chunk_size: int = None):
         """运行新闻语音播报"""
         print("\n" + "=" * 60)
         print("   📻 新闻语音播报器")
@@ -194,7 +207,7 @@ class NewsVoiceBroadcast:
         print("-" * 60)
         
         # 5. 合成语音
-        audio_path = self._text_to_speech(text, output_file)
+        audio_path = self._text_to_speech(text, category, output_file, chunk_size)
         
         # 6. 播放
         if play and audio_path:
@@ -215,16 +228,21 @@ def main():
                "  python scripts/news_voice_broadcast.py --category china   # 中国新闻\n"
                "  python scripts/news_voice_broadcast.py --top 3            # 只播报3条\n"
                "  python scripts/news_voice_broadcast.py --play             # 合成后播放\n"
-               "  python scripts/news_voice_broadcast.py --output daily.mp3 # 指定文件名"
+               "  python scripts/news_voice_broadcast.py --output daily.mp3 # 指定文件名\n"
+               "  python scripts/news_voice_broadcast.py --chunk-size 10000 # 指定每段最大字符数"
     )
     parser.add_argument("--category", "-c", default="tech",
                         help="新闻分类 (tech/business/world/china/usa/japan/korea)")
-    parser.add_argument("--top", "-t", type=int, default=5,
-                        help="播报新闻条数 (默认: 5)")
+    parser.add_argument("--top", "-t", type=int, default=50,
+                        help="播报新闻条数 (默认: 50)")
     parser.add_argument("--output", "-o", default=None,
                         help="输出音频文件名 (默认: 自动生成)")
     parser.add_argument("--play", "-p", action="store_true",
                         help="合成后播放音频")
+    parser.add_argument("--chunk-size", type=int, default=None,
+                        help="每段最大字符数 (覆盖 voice_assistant 默认配置，默认 5000)")
+    parser.add_argument("--save-text", "-s", action="store_true",
+                        help="保存播报文本")
     
     args = parser.parse_args()
     
@@ -234,6 +252,8 @@ def main():
         top_n=args.top,
         output_file=args.output,
         play=args.play,
+        save_text=args.save_text,
+        chunk_size=args.chunk_size
     )
 
 

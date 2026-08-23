@@ -43,6 +43,7 @@ try:
 except ImportError:
     MUTAGEN_AVAILABLE = False
 
+
 class VoiceAssistant:
     """语音合成和识别助手"""
     
@@ -83,15 +84,32 @@ class VoiceAssistant:
     
     def _setup_config(self):
         defaults = {
-            'output_dir': './skills/voice_assistant/output/audio', 
+            # ===== 输出配置 =====
+            'output_dir': './skills/voice_assistant/output/audio',
             'default_voice': 'zh-CN-XiaoxiaoNeural',
             'default_speed': 1.0,
             'default_language': 'zh-CN',
-            'sample_rate': 16000
+            'sample_rate': 16000,
+            
+            # ===== TTS 配置 =====
+            'default_chunk_size': 5000,      # 每段最大字符数
+            'auto_split': False,              # 是否自动按句子分割
+            'max_segments': 50,               # 最大分段数
+            
+            # ===== 语音配置 =====
+            'voice_options': {
+                'zh-CN': ['zh-CN-XiaoxiaoNeural', 'zh-CN-YunxiNeural'],
+                'en-US': ['en-US-JennyNeural', 'en-US-GuyNeural'],
+                'ja-JP': ['ja-JP-NanamiNeural'],
+                'ko-KR': ['ko-KR-SunHiNeural'],
+            },
         }
         for key, value in defaults.items():
             if key not in self.config:
                 self.config[key] = value
+        
+        # 创建输出目录
+        Path(self.config.get('output_dir', './skills/voice_assistant/output/audio')).mkdir(parents=True, exist_ok=True)
     
     def _validate_inputs(self, **kwargs) -> Dict:
         """验证输入参数"""
@@ -100,7 +118,6 @@ class VoiceAssistant:
             raise ValueError(f"不支持的操作: {action}，支持: tts, stt, list_voices")
         
         if action == 'tts':
-            # 支持 text 或 text_file
             text = kwargs.get('text', '')
             text_file = kwargs.get('text_file', '')
             if not text and not text_file:
@@ -115,15 +132,12 @@ class VoiceAssistant:
         
         return kwargs
     
-    
     def _list_voices(self) -> Dict:
         """列出可用语音"""
-        # 如果 edge-tts 可用，获取最新列表
         voices = self.DEFAULT_VOICES
         if EDGE_TTS_AVAILABLE:
             try:
                 import asyncio
-                # 尝试获取最新语音列表
                 try:
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
@@ -150,9 +164,7 @@ class VoiceAssistant:
     
     def _generate_filename(self, text: str, voice: str, output_dir: Path) -> str:
         """生成有意义的文件名"""
-        # 取文本前 15 个字符作为名称
         text_preview = text[:15].strip()
-        # 移除特殊字符
         text_preview = re.sub(r'[^\w\u4e00-\u9fff]', '', text_preview)
         if not text_preview:
             text_preview = "语音"
@@ -162,7 +174,80 @@ class VoiceAssistant:
         
         return f"{text_preview}_{voice_short}_{timestamp}.mp3"
     
-
+    def _split_text(self, text: str, chunk_size: int = 5000, auto_split: bool = False) -> List[str]:
+        """将长文本分割成段落
+        
+        Args:
+            text: 要分割的文本
+            chunk_size: 每段最大字符数
+            auto_split: 是否自动按句子分割（True：按句子分割；False：达到最大长度才分割）
+        """
+        if not text:
+            return []
+        
+        # 如果文本长度不超过 chunk_size，直接返回整段
+        if len(text) <= chunk_size:
+            return [text]
+        
+        # 如果 auto_split 为 False，按标点分割，尽量保持完整句子
+        if not auto_split:
+            import re
+            # 按句子分割
+            sentences = re.split(r'[。！？；\n]+', text)
+            sentences = [s.strip() for s in sentences if s.strip()]
+            
+            chunks = []
+            current = ""
+            for sentence in sentences:
+                if len(current) + len(sentence) + 1 <= chunk_size:
+                    current += sentence + "。"
+                else:
+                    if current:
+                        chunks.append(current.strip())
+                    current = sentence + "。"
+            
+            if current:
+                chunks.append(current.strip())
+            
+            # 如果分割后只有一段，直接返回整段
+            if len(chunks) <= 1:
+                return [text]
+            
+            return chunks
+        
+        # auto_split=True：按句子分割，每段尽量接近 chunk_size
+        import re
+        sentences = re.split(r'[。！？；\n]+', text)
+        sentences = [s.strip() for s in sentences if s.strip()]
+        
+        chunks = []
+        current = ""
+        for sentence in sentences:
+            if len(current) + len(sentence) + 1 <= chunk_size:
+                current += sentence + "。"
+            else:
+                if current:
+                    chunks.append(current.strip())
+                current = sentence + "。"
+        
+        if current:
+            chunks.append(current.strip())
+        
+        # 限制最大分段数
+        max_segments = self.config.get('max_segments', 50)
+        if len(chunks) > max_segments:
+            logger.warning(f"文本被分为 {len(chunks)} 段，超过限制 {max_segments}，将合并")
+            # 合并为更少的段
+            merged = []
+            for i in range(0, len(chunks), 2):
+                if i + 1 < len(chunks):
+                    merged.append(chunks[i] + chunks[i+1])
+                else:
+                    merged.append(chunks[i])
+            chunks = merged
+        
+        return chunks if chunks else [text]
+    
     def _tts(self, text: str, voice: str = None, speed: float = None,
              pitch: str = None, output_file: str = None) -> Dict:
         """文字转语音"""
@@ -172,17 +257,15 @@ class VoiceAssistant:
         voice = voice or self.config.get('default_voice', 'zh-CN-XiaoxiaoNeural')
         speed = speed or self.config.get('default_speed', 1.0)
         
-        output_dir = Path(self.config.get('output_dir', './audio_output'))
+        output_dir = Path(self.config.get('output_dir', './skills/voice_assistant/output/audio'))
         output_dir.mkdir(parents=True, exist_ok=True)
         
-        # ✅ 修复：如果指定了 output_file，使用它；否则自动生成
         if output_file:
             output_path = Path(output_file)
             if not output_path.parent.exists():
                 output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path = str(output_path)
         else:
-            # 自动生成文件名
             output_path = str(output_dir / self._generate_filename(text, voice, output_dir))
         
         try:
@@ -208,8 +291,6 @@ class VoiceAssistant:
         except Exception as e:
             logger.error(f"TTS 失败: {e}")
             return {"error": str(e), "status": "error"}
-
-
     
     def _get_audio_duration(self, audio_path: str) -> float:
         """获取音频时长（秒）"""
@@ -230,10 +311,7 @@ class VoiceAssistant:
         language = language or self.config.get('default_language', 'zh-CN')
         
         try:
-            # 加载模型
             model = whisper.load_model("base")
-            
-            # 转录音频
             result = model.transcribe(audio_file, language=language)
             
             return {
@@ -248,8 +326,7 @@ class VoiceAssistant:
         except Exception as e:
             logger.error(f"STT 失败: {e}")
             return {"error": str(e), "status": "error"}
-
-
+    
     def _read_text_file(self, file_path: str) -> str:
         """读取文本文件并清理 Markdown 标记"""
         path = Path(file_path)
@@ -259,122 +336,55 @@ class VoiceAssistant:
         with open(path, 'r', encoding='utf-8') as f:
             content = f.read()
         
-        # 清理 Markdown 标记
         content = self._clean_markdown(content)
-        
         return content.strip()
-
+    
     def _clean_markdown(self, text: str) -> str:
         """清理 Markdown 标记，只保留纯文本"""
         import re
         
-        # 移除代码块 ```...```
         text = re.sub(r'```.*?```', '', text, flags=re.DOTALL)
-        
-        # 移除标题标记 # ## ### 等
         text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
-        
-        # 移除分割线 --- 或 *** 或 ===
         text = re.sub(r'^[-=*]{3,}\s*$', '', text, flags=re.MULTILINE)
-        
-        # 移除粗体 **text** 或 __text__
         text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
         text = re.sub(r'__(.+?)__', r'\1', text)
-        
-        # 移除斜体 *text* 或 _text_
         text = re.sub(r'\*(.+?)\*', r'\1', text)
         text = re.sub(r'_(.+?)_', r'\1', text)
-        
-        # 移除行内代码 `code`
         text = re.sub(r'`(.+?)`', r'\1', text)
-        
-        # 移除链接 [text](url)
         text = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', text)
-        
-        # 移除图片 ![alt](url)
         text = re.sub(r'!\[(.+?)\]\(.+?\)', r'\1', text)
-        
-        # 移除列表标记 - 或 * 或 1. 等
         text = re.sub(r'^[\s]*[-*+]\s+', '', text, flags=re.MULTILINE)
         text = re.sub(r'^[\s]*\d+\.\s+', '', text, flags=re.MULTILINE)
-        
-        # 移除多余空行
         text = re.sub(r'\n{3,}', '\n\n', text)
-        
-        # 移除分隔线字符（单独一行的 ======）
         text = re.sub(r'^[=\-]{10,}\s*$', '', text, flags=re.MULTILINE)
         
         return text
     
-    def _split_text(self, text: str, chunk_size: int = 500, auto_split: bool = True) -> List[str]:
-        """将长文本分割成段落"""
-        if not text:
-            return []
-        
-        # 按句子分割
-        if auto_split:
-            import re
-            # 按中文标点分割：。！？；\n
-            sentences = re.split(r'[。！？；\n]+', text)
-            sentences = [s.strip() for s in sentences if s.strip()]
-        else:
-            sentences = [text]
-        
-        # 合并成 chunk
-        chunks = []
-        current = ""
-        for sentence in sentences:
-            if len(current) + len(sentence) <= chunk_size:
-                current += sentence + "。"
-            else:
-                if current:
-                    chunks.append(current.strip())
-                current = sentence + "。"
-        
-        if current:
-            chunks.append(current.strip())
-        
-        return chunks
-    
-
     def _merge_audio(self, audio_paths: List[str], output_path: str = None) -> str:
         """使用 ffmpeg 合并多个音频文件为一个"""
         if len(audio_paths) == 1:
             return audio_paths[0]
-
-        # 如果传入了 output_path，直接使用
+        
         if output_path:
-            # 确保目录存在
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         else:
-            # 自动生成
             output_dir = Path(audio_paths[0]).parent
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_path = str(output_dir / f"merged_{timestamp}.mp3")
         
         try:
             import subprocess
-            
-            # 检查 ffmpeg 是否可用
             result = subprocess.run(['ffmpeg', '-version'], capture_output=True, timeout=5)
             if result.returncode != 0:
                 logger.warning("ffmpeg 未安装，无法合并音频")
                 return None
             
-            if not output_path:
-                output_dir = Path(audio_paths[0]).parent
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                output_path = str(output_dir / f"merged_{timestamp}.mp3")
-            
-            # 创建 ffmpeg 需要的文件列表
             list_file = Path(audio_paths[0]).parent / "merge_list.txt"
             with open(list_file, 'w', encoding='utf-8') as f:
                 for path in audio_paths:
-                    # ffmpeg concat 需要绝对路径
                     abs_path = str(Path(path).absolute())
                     f.write(f"file '{abs_path}'\n")
             
-            # 执行 ffmpeg 合并
             cmd = [
                 'ffmpeg', '-f', 'concat', '-safe', '0',
                 '-i', str(list_file),
@@ -384,7 +394,6 @@ class VoiceAssistant:
             
             result = subprocess.run(cmd, capture_output=True, timeout=60)
             
-            # 清理临时文件
             if list_file.exists():
                 list_file.unlink()
             
@@ -400,28 +409,24 @@ class VoiceAssistant:
         except Exception as e:
             logger.error(f"合并音频失败: {e}")
             return None
-        
-
+    
     def _ensure_ffmpeg(self):
         """确保 ffmpeg 可用"""
         import subprocess
         import sys
-        
         try:
-            # 检查 ffmpeg 是否可用
             subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True)
             return True
         except:
             logger.warning("ffmpeg 未安装，尝试自动安装...")
             try:
-                # 使用 pip 安装 ffmpeg-python
                 subprocess.run([sys.executable, '-m', 'pip', 'install', 'ffmpeg-python'], 
                               capture_output=True, check=True)
                 return True
             except:
                 logger.error("ffmpeg 安装失败，请手动安装")
                 return False
-            
+    
     def execute(self, **kwargs) -> Dict[str, Any]:
         """执行操作"""
         start_time = time.time()
@@ -440,21 +445,19 @@ class VoiceAssistant:
                 voice = params.get('voice', self.config.get('default_voice', 'zh-CN-XiaoxiaoNeural'))
                 speed = params.get('speed', self.config.get('default_speed', 1.0))
                 output_file = params.get('output_file')
-                chunk_size = params.get('chunk_size', 500)
-                auto_split = params.get('auto_split', True)
+                chunk_size = params.get('chunk_size', self.config.get('default_chunk_size', 5000))
+                auto_split = params.get('auto_split', self.config.get('auto_split', False))
 
-                # 定义输出目录（这里添加）
-                output_dir = Path(self.config.get('output_dir', './audio_output'))
+                output_dir = Path(self.config.get('output_dir', './skills/voice_assistant/output/audio'))
                 output_dir.mkdir(parents=True, exist_ok=True)
     
-                # 从文件读取文本
                 if text_file and not text:
                     text = self._read_text_file(text_file)
                 
                 if not text:
                     raise ValueError("请提供 text 或 text_file 参数")
                 
-                # 如果文本太长，分段生成
+                # 分割文本
                 chunks = self._split_text(text, chunk_size, auto_split)
                 
                 if len(chunks) > 1:
@@ -462,7 +465,6 @@ class VoiceAssistant:
                     audio_paths = []
                     for i, chunk in enumerate(chunks):
                         logger.info(f"  生成第 {i+1}/{len(chunks)} 段...")
-                        # 分段文件使用自动命名（保留用于调试）
                         seg_file = str(output_dir / self._generate_filename(
                             chunk[:20] + f"_第{i+1}段", voice, output_dir
                         ))
@@ -471,11 +473,10 @@ class VoiceAssistant:
                             return result
                         audio_paths.append(result.get('audio_path'))
                     
-                    # ✅ 修复：合并时使用 output_file
+                    # 合并音频
                     merged_path = None
                     if len(audio_paths) > 1:
                         logger.info(f"🔄 正在合并 {len(audio_paths)} 段音频...")
-                        # 如果指定了 output_file 就用它，否则自动生成
                         if output_file:
                             merge_output = output_file
                         else:
@@ -544,7 +545,7 @@ class VoiceAssistant:
                 "skill": self.name,
                 "timestamp": datetime.now().isoformat()
             }
-        
+    
     def __repr__(self):
         return f"<VoiceAssistant(name={self.name}, version={self.version})>"
 
