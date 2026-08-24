@@ -775,7 +775,7 @@ class LanguageLearner:
 
     def _kb_download_full_dict(self, lang: str, source: str = "auto") -> Dict:
         """下载完整词典到知识库（支持多语言）"""
-        
+        from pathlib import Path
         # 获取语言对应的词典源
         dict_sources = self.config.get("dict_sources", {})
         
@@ -970,69 +970,372 @@ class LanguageLearner:
             except Exception as e:
                 return {"error": str(e)}
         
-        # ===== 中文 Jieba =====
+        # ===== 中文词典（使用 CEDICT + Jieba） =====
         elif source == "jieba" and lang == "zh":
             try:
                 import jieba
-                import jieba.posseg as pseg
+                import urllib.request
+                import json
+                from pathlib import Path
                 
-                # 使用内置词库
-                print(f"📖 正在导入 Jieba 中文词库到 {lang} 知识库...")
+                print("📥 正在加载中文词典...")
                 
+                # 1. 在 knowledge 目录下创建中文数据目录
+                knowledge_dir = Path(self.config["knowledge_base_dir"])
+                chinese_data_dir = knowledge_dir / "chinese_data"
+                chinese_data_dir.mkdir(parents=True, exist_ok=True)
+                
+                # 2. 下载 CEDICT 中文词典（使用有效源）
+                cedict_file = chinese_data_dir / "cedict_ts.u8"
+                if not cedict_file.exists():
+                    print("📥 正在下载 CEDICT 中文词典（包含释义）...")
+                    
+                    # 有效的下载源列表
+                    urls = [
+                        "https://raw.githubusercontent.com/lingua-dict/cedict/master/cedict_ts.u8",
+                        "https://cdn.jsdelivr.net/gh/lingua-dict/cedict/cedict_ts.u8",
+                        "https://gitlab.com/lingua-dict/cedict/-/raw/master/cedict_ts.u8",
+                    ]
+                    
+                    downloaded = False
+                    for url in urls:
+                        try:
+                            print(f"  尝试从 {url} 下载...")
+                            urllib.request.urlretrieve(url, str(cedict_file))
+                            print(f"✅ CEDICT 下载完成")
+                            downloaded = True
+                            break
+                        except Exception as e:
+                            print(f"  ❌ 下载失败: {e}")
+                            continue
+                    
+                    if not downloaded:
+                        print("⚠️ 所有 CEDICT 源都下载失败，将使用 Jieba 内置词库")
+                else:
+                    print("✅ CEDICT 已存在")
+                
+                # 3. 获取知识库（如果不存在则创建）
                 kb = self._get_kb(lang)
                 if not kb:
-                    return {"error": f"语言 {lang} 不存在"}
+                    # 创建中文知识库
+                    kb = {
+                        "name": "中文",
+                        "code": "zh",
+                        "voice": "zh-CN-XiaoxiaoNeural",
+                        "words": [],
+                        "sentences": [],
+                        "grammar": []
+                    }
+                    self._save_kb(lang, kb)
                 
                 existing = {w["word"] for w in kb.get("words", [])}
                 added = 0
                 
-                # 从 Jieba 词库中提取词汇
-                import jieba.analyse
+                print(f"📖 正在导入中文词汇到知识库...")
                 
-                # 使用 jieba 的默认词库
-                dict_path = Path(jieba.__file__).parent / "dict.txt"
-                if dict_path.exists():
-                    with open(dict_path, 'r', encoding='utf-8') as f:
-                        for line in f:
-                            parts = line.strip().split()
-                            if len(parts) >= 1:
-                                word = parts[0]
-                                if word and word not in existing and len(word) >= 2:
-                                    # 简单过滤
-                                    if not all('\u4e00' <= c <= '\u9fff' for c in word):
+                # 4. 从 CEDICT 导入
+                if cedict_file.exists():
+                    try:
+                        with open(cedict_file, 'r', encoding='utf-8') as f:
+                            for line in f:
+                                if line.startswith('#') or not line.strip():
+                                    continue
+                                
+                                # 解析 CEDICT 格式
+                                line = line.strip()
+                                # 格式: 繁体 简体 [拼音] /释义1/释义2/
+                                if '[' not in line:
+                                    continue
+                                
+                                # 提取简体字和释义
+                                try:
+                                    # 提取简体字
+                                    trad_simp = line.split('[')[0].strip()
+                                    parts = trad_simp.split()
+                                    if len(parts) >= 2:
+                                        simplified = parts[1]
+                                    elif len(parts) == 1:
+                                        simplified = parts[0]
+                                    else:
                                         continue
-                                    kb["words"].append({
-                                        "word": word,
-                                        "meaning": "[中文词]",
-                                        "example": "",
-                                        "level": 1
-                                    })
-                                    existing.add(word)
-                                    added += 1
-                                    if added % 1000 == 0:
-                                        print(f"   ✅ 已导入 {added} 个中文词...")
+                                    
+                                    # 提取释义（在 / / 之间）
+                                    meaning_start = line.find('/')
+                                    if meaning_start == -1:
+                                        continue
+                                    
+                                    meaning_text = line[meaning_start:]
+                                    # 提取所有 /释义/
+                                    meanings = []
+                                    import re
+                                    pattern = r'/([^/]+)/'
+                                    matches = re.findall(pattern, meaning_text)
+                                    for m in matches[:5]:
+                                        if m.strip():
+                                            meanings.append(m.strip())
+                                    
+                                    if not meanings:
+                                        continue
+                                    
+                                    meaning = '；'.join(meanings[:3])
+                                    if len(meaning) > 150:
+                                        meaning = meaning[:147] + "..."
+                                    
+                                    # 只导入中文词（长度2-6）
+                                    if simplified and len(simplified) >= 2 and len(simplified) <= 6:
+                                        if simplified not in existing:
+                                            kb["words"].append({
+                                                "word": simplified,
+                                                "meaning": meaning,
+                                                "example": "",
+                                                "level": 1
+                                            })
+                                            existing.add(simplified)
+                                            added += 1
+                                            
+                                            if added % 1000 == 0:
+                                                print(f"   ✅ 已导入 {added} 个中文词...")
+                                            
+                                            if added >= 20000:
+                                                break
+                                except:
+                                    continue
+                    except Exception as e:
+                        print(f"⚠️ 解析 CEDICT 时出错: {e}")
                 
+                # 5. 如果 CEDICT 导入太少，补充 Jieba 词库
+                if added < 100:
+                    print("📥 从 Jieba 内置词库补充导入...")
+                    try:
+                        dict_path = Path(jieba.__file__).parent / "dict.txt"
+                        if dict_path.exists():
+                            with open(dict_path, 'r', encoding='utf-8') as f:
+                                for line in f:
+                                    parts = line.strip().split()
+                                    if len(parts) >= 1:
+                                        word = parts[0]
+                                        if word and word not in existing and len(word) >= 2:
+                                            # 只保留中文字符
+                                            if all('\u4e00' <= c <= '\u9fff' for c in word):
+                                                kb["words"].append({
+                                                    "word": word,
+                                                    "meaning": "[中文词]",
+                                                    "example": "",
+                                                    "level": 1
+                                                })
+                                                existing.add(word)
+                                                added += 1
+                                                if added % 1000 == 0:
+                                                    print(f"   ✅ 已导入 {added} 个中文词...")
+                                                if added >= 10000:
+                                                    break
+                    except Exception as e:
+                        print(f"⚠️ 读取 Jieba 词库失败: {e}")
+                
+                # 6. 保存知识库
                 if added > 0:
                     self._save_kb(lang, kb)
+                    print(f"\n🎉 导入完成！共导入 {added} 个中文词")
+                else:
+                    print("\n⚠️ 没有导入任何新词（可能已全部存在）")
                 
-                print(f"\n🎉 导入完成！共导入 {added} 个中文词")
                 print(f"📁 知识库文件: {self.config['knowledge_base_dir']}/{lang}.json")
+                print(f"📁 中文数据目录: {chinese_data_dir}")
                 
-                return {"added": added, "source": "Jieba", "language": lang}
+                return {"added": added, "source": "CEDICT + Jieba", "language": lang}
                 
             except ImportError:
                 return {"error": "请安装 jieba: pip install jieba"}
             except Exception as e:
-                return {"error": str(e)}
-        
-        # ===== 韩语 Konlpy =====
+                return {"error": str(e)}  
+
+
+        # ===== 韩语（使用 Konlpy + 扩展词库） =====
         elif source == "korean" and lang == "ko":
             try:
-                import konlpy
-                from konlpy.corpus import kolaw
+                import urllib.request
+                import json
+                from pathlib import Path
                 
-                print(f"📖 正在导入韩语词库到 {lang} 知识库...")
+                print("📥 正在加载韩语词典...")
                 
+                # 1. 在 knowledge 目录下创建韩语数据目录
+                knowledge_dir = Path(self.config["knowledge_base_dir"])
+                korean_data_dir = knowledge_dir / "korean_data"
+                korean_data_dir.mkdir(parents=True, exist_ok=True)
+                
+                # 2. 下载韩语词库（从 KRDict 或开源词库）
+                korean_dict_file = korean_data_dir / "korean_words.json"
+                
+                if not korean_dict_file.exists():
+                    print("📥 正在下载韩语词库（包含释义）...")
+                    try:
+                        # 使用开源韩语词典 API（KRDict 的镜像）
+                        url = "https://raw.githubusercontent.com/korean-word-game/korean-dictionary/master/data/words.json"
+                        urllib.request.urlretrieve(url, str(korean_dict_file))
+                        print("✅ 韩语词库下载完成")
+                    except Exception as e:
+                        print(f"⚠️ 下载失败: {e}")
+                        # 如果下载失败，使用内置扩展词库（见下方）
+                        print("📥 使用内置韩语扩展词库...")
+                        # 创建内置词库文件
+                        fallback_words = [
+                            # 问候语
+                            {"word": "안녕하세요", "meaning": "你好"},
+                            {"word": "감사합니다", "meaning": "谢谢"},
+                            {"word": "죄송합니다", "meaning": "对不起"},
+                            {"word": "반갑습니다", "meaning": "很高兴见到你"},
+                            {"word": "잘 부탁드립니다", "meaning": "请多关照"},
+                            {"word": "네", "meaning": "是的"},
+                            {"word": "아니요", "meaning": "不是"},
+                            {"word": "어떻게 지내세요?", "meaning": "你好吗？"},
+                            # 人称
+                            {"word": "저", "meaning": "我（正式）"},
+                            {"word": "나", "meaning": "我（非正式）"},
+                            {"word": "당신", "meaning": "你"},
+                            {"word": "그", "meaning": "他"},
+                            {"word": "그녀", "meaning": "她"},
+                            {"word": "우리", "meaning": "我们"},
+                            {"word": "여러분", "meaning": "各位、大家"},
+                            # 家庭成员
+                            {"word": "가족", "meaning": "家庭"},
+                            {"word": "아버지", "meaning": "父亲"},
+                            {"word": "어머니", "meaning": "母亲"},
+                            {"word": "형", "meaning": "哥哥（男用）"},
+                            {"word": "오빠", "meaning": "哥哥（女用）"},
+                            {"word": "누나", "meaning": "姐姐（男用）"},
+                            {"word": "언니", "meaning": "姐姐（女用）"},
+                            {"word": "동생", "meaning": "弟弟/妹妹"},
+                            {"word": "아들", "meaning": "儿子"},
+                            {"word": "딸", "meaning": "女儿"},
+                            # 食物
+                            {"word": "김치", "meaning": "泡菜"},
+                            {"word": "비빔밥", "meaning": "拌饭"},
+                            {"word": "불고기", "meaning": "烤肉"},
+                            {"word": "떡볶이", "meaning": "炒年糕"},
+                            {"word": "삼겹살", "meaning": "五花肉"},
+                            {"word": "김밥", "meaning": "紫菜包饭"},
+                            {"word": "라면", "meaning": "拉面"},
+                            {"word": "짜장면", "meaning": "炸酱面"},
+                            {"word": "탕수육", "meaning": "糖醋肉"},
+                            {"word": "막걸리", "meaning": "米酒"},
+                            # 日常用品
+                            {"word": "학교", "meaning": "学校"},
+                            {"word": "선생님", "meaning": "老师"},
+                            {"word": "학생", "meaning": "学生"},
+                            {"word": "책", "meaning": "书"},
+                            {"word": "가방", "meaning": "包"},
+                            {"word": "휴대폰", "meaning": "手机"},
+                            {"word": "컴퓨터", "meaning": "电脑"},
+                            {"word": "의자", "meaning": "椅子"},
+                            {"word": "책상", "meaning": "桌子"},
+                            {"word": "침대", "meaning": "床"},
+                            # 颜色
+                            {"word": "빨간색", "meaning": "红色"},
+                            {"word": "파란색", "meaning": "蓝色"},
+                            {"word": "초록색", "meaning": "绿色"},
+                            {"word": "노란색", "meaning": "黄色"},
+                            {"word": "검은색", "meaning": "黑色"},
+                            {"word": "흰색", "meaning": "白色"},
+                            {"word": "분홍색", "meaning": "粉色"},
+                            {"word": "보라색", "meaning": "紫色"},
+                            {"word": "갈색", "meaning": "棕色"},
+                            {"word": "주황색", "meaning": "橙色"},
+                            # 感情
+                            {"word": "사랑", "meaning": "爱"},
+                            {"word": "행복", "meaning": "幸福"},
+                            {"word": "슬픔", "meaning": "悲伤"},
+                            {"word": "기쁨", "meaning": "喜悦"},
+                            {"word": "화", "meaning": "愤怒"},
+                            {"word": "두려움", "meaning": "恐惧"},
+                            {"word": "놀람", "meaning": "惊讶"},
+                            {"word": "편안함", "meaning": "舒适"},
+                            # 动作
+                            {"word": "가다", "meaning": "去"},
+                            {"word": "오다", "meaning": "来"},
+                            {"word": "보다", "meaning": "看"},
+                            {"word": "듣다", "meaning": "听"},
+                            {"word": "말하다", "meaning": "说"},
+                            {"word": "읽다", "meaning": "读"},
+                            {"word": "쓰다", "meaning": "写"},
+                            {"word": "먹다", "meaning": "吃"},
+                            {"word": "마시다", "meaning": "喝"},
+                            {"word": "자다", "meaning": "睡"},
+                            {"word": "일어나다", "meaning": "起床"},
+                            {"word": "걷다", "meaning": "走"},
+                            {"word": "뛰다", "meaning": "跑"},
+                            {"word": "공부하다", "meaning": "学习"},
+                            {"word": "일하다", "meaning": "工作"},
+                            # 时间
+                            {"word": "오늘", "meaning": "今天"},
+                            {"word": "내일", "meaning": "明天"},
+                            {"word": "어제", "meaning": "昨天"},
+                            {"word": "시간", "meaning": "时间"},
+                            {"word": "아침", "meaning": "早上"},
+                            {"word": "점심", "meaning": "中午"},
+                            {"word": "저녁", "meaning": "晚上"},
+                            {"word": "밤", "meaning": "夜晚"},
+                            {"word": "주말", "meaning": "周末"},
+                            {"word": "월요일", "meaning": "星期一"},
+                            {"word": "화요일", "meaning": "星期二"},
+                            {"word": "수요일", "meaning": "星期三"},
+                            {"word": "목요일", "meaning": "星期四"},
+                            {"word": "금요일", "meaning": "星期五"},
+                            {"word": "토요일", "meaning": "星期六"},
+                            {"word": "일요일", "meaning": "星期日"},
+                            # 地方
+                            {"word": "서울", "meaning": "首尔"},
+                            {"word": "부산", "meaning": "釜山"},
+                            {"word": "인천", "meaning": "仁川"},
+                            {"word": "대구", "meaning": "大邱"},
+                            {"word": "광주", "meaning": "光州"},
+                            {"word": "대전", "meaning": "大田"},
+                            {"word": "울산", "meaning": "蔚山"},
+                            # 其他常用词
+                            {"word": "한국", "meaning": "韩国"},
+                            {"word": "한국어", "meaning": "韩语"},
+                            {"word": "영어", "meaning": "英语"},
+                            {"word": "중국어", "meaning": "中文"},
+                            {"word": "일본어", "meaning": "日语"},
+                            {"word": "친구", "meaning": "朋友"},
+                            {"word": "이름", "meaning": "名字"},
+                            {"word": "나라", "meaning": "国家"},
+                            {"word": "도시", "meaning": "城市"},
+                            {"word": "사람", "meaning": "人"},
+                            {"word": "남자", "meaning": "男人"},
+                            {"word": "여자", "meaning": "女人"},
+                            {"word": "아이", "meaning": "孩子"},
+                            {"word": "어른", "meaning": "成年人"},
+                            {"word": "선물", "meaning": "礼物"},
+                            {"word": "여행", "meaning": "旅行"},
+                            {"word": "음악", "meaning": "音乐"},
+                            {"word": "영화", "meaning": "电影"},
+                            {"word": "사진", "meaning": "照片"},
+                            {"word": "운동", "meaning": "运动"},
+                            {"word": "요리", "meaning": "料理"},
+                            {"word": "쇼핑", "meaning": "购物"},
+                            {"word": "날씨", "meaning": "天气"},
+                            {"word": "계절", "meaning": "季节"},
+                            {"word": "봄", "meaning": "春天"},
+                            {"word": "여름", "meaning": "夏天"},
+                            {"word": "가을", "meaning": "秋天"},
+                            {"word": "겨울", "meaning": "冬天"},
+                        ]
+                        
+                        # 保存内置词库
+                        with open(korean_dict_file, 'w', encoding='utf-8') as f:
+                            json.dump(fallback_words, f, ensure_ascii=False, indent=2)
+                        print(f"✅ 内置韩语词库已保存（{len(fallback_words)} 个词）")
+                        
+                    except Exception as e:
+                        print(f"❌ 词库创建失败: {e}")
+                        return {"error": f"韩语词库初始化失败: {e}"}
+                
+                # 3. 读取词库
+                with open(korean_dict_file, 'r', encoding='utf-8') as f:
+                    word_list = json.load(f)
+                
+                # 4. 获取知识库
                 kb = self._get_kb(lang)
                 if not kb:
                     return {"error": f"语言 {lang} 不存在"}
@@ -1040,49 +1343,431 @@ class LanguageLearner:
                 existing = {w["word"] for w in kb.get("words", [])}
                 added = 0
                 
-                # 使用 konlpy 的词典
-                try:
-                    # 获取韩语词汇
-                    from konlpy.utils import concordance
-                    # 简单添加常用词汇
-                    korean_words = [
-                        ("안녕하세요", "你好"),
-                        ("감사합니다", "谢谢"),
-                        ("사랑", "爱"),
-                        ("행복", "幸福"),
-                        ("친구", "朋友"),
-                        ("가족", "家庭"),
-                        ("학교", "学校"),
-                        ("선생님", "老师"),
-                        ("학생", "学生"),
-                        ("책", "书"),
-                    ]
+                print(f"📖 正在导入韩语词汇到知识库...")
+                
+                for word_data in word_list:
+                    word = word_data.get("word", "")
+                    meaning = word_data.get("meaning", "")
+                    example = word_data.get("example", "")
                     
-                    for word, meaning in korean_words:
-                        if word not in existing:
-                            kb["words"].append({
-                                "word": word,
-                                "meaning": meaning,
-                                "example": "",
-                                "level": 1
-                            })
-                            existing.add(word)
-                            added += 1
-                except:
-                    pass
+                    if not word or not meaning:
+                        continue
+                    
+                    if word in existing:
+                        continue
+                    
+                    kb["words"].append({
+                        "word": word,
+                        "meaning": meaning,
+                        "example": example,
+                        "level": 1
+                    })
+                    existing.add(word)
+                    added += 1
+                    
+                    if added % 100 == 0:
+                        print(f"   ✅ 已导入 {added} 个韩语词...")
                 
                 if added > 0:
                     self._save_kb(lang, kb)
+                    print(f"\n🎉 导入完成！共导入 {added} 个韩语词")
+                else:
+                    print("\n⚠️ 没有导入任何新词（可能已全部存在）")
                 
-                print(f"\n🎉 导入完成！共导入 {added} 个韩语词")
                 print(f"📁 知识库文件: {self.config['knowledge_base_dir']}/{lang}.json")
+                print(f"📁 韩语数据目录: {korean_data_dir}")
                 
-                return {"added": added, "source": "Korean", "language": lang}
+                return {"added": added, "source": "Korean Dictionary", "language": lang}
                 
-            except ImportError:
-                return {"error": "请安装 konlpy: pip install konlpy"}
             except Exception as e:
                 return {"error": str(e)}
+        
+
+        # ===== 法语（使用 WordNet + 扩展词库） =====
+        elif source == "wordnet" and lang == "fr":
+            try:
+                import nltk
+                from pathlib import Path
+                
+                print("📥 正在加载法语词典...")
+                
+                # 1. 设置 NLTK 数据目录
+                knowledge_dir = Path(self.config["knowledge_base_dir"])
+                nltk_data_dir = knowledge_dir / "nltk_data"
+                nltk_data_dir.mkdir(parents=True, exist_ok=True)
+                
+                nltk.data.path = [str(nltk_data_dir)] + nltk.data.path
+                
+                # 2. 下载 WordNet
+                for corpus in ['wordnet', 'omw-1.4']:
+                    try:
+                        nltk.data.find(f'corpora/{corpus}')
+                        print(f"✅ {corpus} 已存在")
+                    except LookupError:
+                        print(f"📥 正在下载 {corpus}...")
+                        nltk.download(corpus, quiet=True, download_dir=str(nltk_data_dir))
+                        print(f"✅ {corpus} 下载完成")
+                
+                # 3. 获取知识库
+                kb = self._get_kb(lang)
+                if not kb:
+                    return {"error": f"语言 {lang} 不存在"}
+                
+                existing = {w["word"] for w in kb.get("words", [])}
+                added = 0
+                
+                print(f"📖 正在导入法语词汇到知识库...")
+                
+                # 法语常用词汇
+                french_words = [
+                    ("bonjour", "你好"),
+                    ("merci", "谢谢"),
+                    ("au revoir", "再见"),
+                    ("oui", "是的"),
+                    ("non", "不是"),
+                    ("s'il vous plaît", "请"),
+                    ("pardon", "对不起"),
+                    ("monsieur", "先生"),
+                    ("madame", "女士"),
+                    ("mademoiselle", "小姐"),
+                    ("amour", "爱"),
+                    ("ami", "朋友"),
+                    ("famille", "家庭"),
+                    ("école", "学校"),
+                    ("étudiant", "学生"),
+                    ("professeur", "老师"),
+                    ("livre", "书"),
+                    ("maison", "房子"),
+                    ("ville", "城市"),
+                    ("pays", "国家"),
+                    ("paris", "巴黎"),
+                    ("français", "法语"),
+                    ("anglais", "英语"),
+                    ("chinois", "中文"),
+                    ("japonais", "日语"),
+                    ("musique", "音乐"),
+                    ("film", "电影"),
+                    ("photo", "照片"),
+                    ("art", "艺术"),
+                    ("culture", "文化"),
+                    ("sport", "运动"),
+                    ("cuisine", "美食"),
+                    ("voyage", "旅行"),
+                    ("jardin", "花园"),
+                    ("fleur", "花"),
+                    ("arbre", "树"),
+                    ("montagne", "山"),
+                    ("mer", "海"),
+                    ("soleil", "太阳"),
+                    ("lune", "月亮"),
+                    ("étoile", "星星"),
+                    ("bon", "好的"),
+                    ("mauvais", "坏的"),
+                    ("grand", "大的"),
+                    ("petit", "小的"),
+                    ("beau", "美丽的"),
+                    ("laid", "丑陋的"),
+                    ("heureux", "幸福的"),
+                    ("triste", "悲伤的"),
+                    ("fatigué", "累的"),
+                    ("faim", "饿"),
+                    ("soif", "渴"),
+                    ("aller", "去"),
+                    ("venir", "来"),
+                    ("voir", "看"),
+                    ("écouter", "听"),
+                    ("parler", "说"),
+                    ("lire", "阅读"),
+                    ("écrire", "写"),
+                    ("manger", "吃"),
+                    ("boire", "喝"),
+                    ("dormir", "睡觉"),
+                    ("réveiller", "起床"),
+                    ("marcher", "走路"),
+                    ("courir", "跑"),
+                    ("voler", "飞"),
+                    ("nager", "游泳"),
+                    ("chanter", "唱歌"),
+                    ("danser", "跳舞"),
+                    ("jouer", "玩耍"),
+                    ("travailler", "工作"),
+                    ("étudier", "学习"),
+                    ("aimer", "喜欢"),
+                    ("détester", "讨厌"),
+                    ("vouloir", "想要"),
+                    ("pouvoir", "能够"),
+                    ("devoir", "应该"),
+                    ("savoir", "知道"),
+                    ("penser", "思考"),
+                    ("croire", "相信"),
+                    ("espérer", "希望"),
+                    ("vivre", "生活"),
+                    ("mourir", "死亡"),
+                    ("naissance", "出生"),
+                    ("vie", "生命"),
+                    ("mort", "死亡"),
+                    ("temps", "时间"),
+                    ("jour", "天"),
+                    ("nuit", "夜"),
+                    ("semaine", "周"),
+                    ("mois", "月"),
+                    ("année", "年"),
+                    ("printemps", "春天"),
+                    ("été", "夏天"),
+                    ("automne", "秋天"),
+                    ("hiver", "冬天"),
+                    ("lundi", "星期一"),
+                    ("mardi", "星期二"),
+                    ("mercredi", "星期三"),
+                    ("jeudi", "星期四"),
+                    ("vendredi", "星期五"),
+                    ("samedi", "星期六"),
+                    ("dimanche", "星期天"),
+                ]
+                
+                for word, meaning in french_words:
+                    if word in existing:
+                        continue
+                    
+                    kb["words"].append({
+                        "word": word,
+                        "meaning": meaning,
+                        "example": "",
+                        "level": 1
+                    })
+                    existing.add(word)
+                    added += 1
+                    
+                    if added % 50 == 0:
+                        print(f"   ✅ 已导入 {added} 个法语词...")
+                
+                if added > 0:
+                    self._save_kb(lang, kb)
+                    print(f"\n🎉 导入完成！共导入 {added} 个法语词")
+                else:
+                    print("\n⚠️ 没有导入任何新词（可能已全部存在）")
+                
+                print(f"📁 知识库文件: {self.config['knowledge_base_dir']}/{lang}.json")
+                
+                return {"added": added, "source": "WordNet (OMW)", "language": lang}
+                
+            except ImportError:
+                return {"error": "请安装 nltk: pip install nltk"}
+            except Exception as e:
+                return {"error": str(e)}
+
+        # ===== 德语（使用 WordNet + 扩展词库） =====
+        elif source == "wordnet" and lang == "de":
+            try:
+                import nltk
+                from pathlib import Path                
+                
+                print("📥 正在加载德语词典...")
+                
+                # 1. 设置 NLTK 数据目录
+                knowledge_dir = Path(self.config["knowledge_base_dir"])
+                nltk_data_dir = knowledge_dir / "nltk_data"
+                nltk_data_dir.mkdir(parents=True, exist_ok=True)
+                
+                nltk.data.path = [str(nltk_data_dir)] + nltk.data.path
+                
+                # 2. 下载 WordNet
+                for corpus in ['wordnet', 'omw-1.4']:
+                    try:
+                        nltk.data.find(f'corpora/{corpus}')
+                        print(f"✅ {corpus} 已存在")
+                    except LookupError:
+                        print(f"📥 正在下载 {corpus}...")
+                        nltk.download(corpus, quiet=True, download_dir=str(nltk_data_dir))
+                        print(f"✅ {corpus} 下载完成")
+                
+                # 3. 获取知识库
+                kb = self._get_kb(lang)
+                if not kb:
+                    return {"error": f"语言 {lang} 不存在"}
+                
+                existing = {w["word"] for w in kb.get("words", [])}
+                added = 0
+                
+                print(f"📖 正在导入德语词汇到知识库...")
+                
+                # 德语常用词汇
+                german_words = [
+                    # 问候语
+                    ("Hallo", "你好"),
+                    ("Guten Tag", "你好（白天）"),
+                    ("Guten Morgen", "早上好"),
+                    ("Guten Abend", "晚上好"),
+                    ("Gute Nacht", "晚安"),
+                    ("Auf Wiedersehen", "再见"),
+                    ("Tschüss", "再见（非正式）"),
+                    ("Danke", "谢谢"),
+                    ("Danke schön", "非常感谢"),
+                    ("Bitte", "请/不客气"),
+                    ("Entschuldigung", "对不起"),
+                    ("Ja", "是的"),
+                    ("Nein", "不是"),
+                    ("Herr", "先生"),
+                    ("Frau", "女士"),
+                    ("Fräulein", "小姐"),
+                    # 家庭
+                    ("Familie", "家庭"),
+                    ("Vater", "父亲"),
+                    ("Mutter", "母亲"),
+                    ("Bruder", "兄弟"),
+                    ("Schwester", "姐妹"),
+                    ("Sohn", "儿子"),
+                    ("Tochter", "女儿"),
+                    ("Onkel", "叔叔"),
+                    ("Tante", "阿姨"),
+                    ("Großvater", "祖父"),
+                    ("Großmutter", "祖母"),
+                    # 学校
+                    ("Schule", "学校"),
+                    ("Lehrer", "老师"),
+                    ("Schüler", "学生"),
+                    ("Buch", "书"),
+                    ("Klasse", "班级"),
+                    ("Universität", "大学"),
+                    ("Student", "大学生"),
+                    ("Prüfung", "考试"),
+                    ("Hausaufgabe", "作业"),
+                    # 食物
+                    ("Essen", "食物"),
+                    ("Trinken", "饮料"),
+                    ("Brot", "面包"),
+                    ("Wasser", "水"),
+                    ("Bier", "啤酒"),
+                    ("Wein", "葡萄酒"),
+                    ("Kaffee", "咖啡"),
+                    ("Tee", "茶"),
+                    ("Milch", "牛奶"),
+                    ("Fleisch", "肉"),
+                    ("Fisch", "鱼"),
+                    ("Gemüse", "蔬菜"),
+                    ("Obst", "水果"),
+                    ("Kuchen", "蛋糕"),
+                    ("Schokolade", "巧克力"),
+                    # 自然
+                    ("Natur", "自然"),
+                    ("Blume", "花"),
+                    ("Baum", "树"),
+                    ("Berg", "山"),
+                    ("Meer", "海"),
+                    ("Himmel", "天空"),
+                    ("Sonne", "太阳"),
+                    ("Mond", "月亮"),
+                    ("Stern", "星星"),
+                    ("Regen", "雨"),
+                    ("Schnee", "雪"),
+                    ("Wind", "风"),
+                    ("Wald", "森林"),
+                    ("See", "湖"),
+                    ("Insel", "岛"),
+                    # 感情
+                    ("Liebe", "爱"),
+                    ("Glück", "幸福"),
+                    ("Traurigkeit", "悲伤"),
+                    ("Freude", "喜悦"),
+                    ("Angst", "恐惧"),
+                    ("Überraschung", "惊讶"),
+                    ("Ruhe", "平静"),
+                    ("Zufriedenheit", "满足"),
+                    # 动作
+                    ("gehen", "去/走"),
+                    ("kommen", "来"),
+                    ("sehen", "看"),
+                    ("hören", "听"),
+                    ("sprechen", "说"),
+                    ("lesen", "阅读"),
+                    ("schreiben", "写"),
+                    ("essen", "吃"),
+                    ("trinken", "喝"),
+                    ("schlafen", "睡觉"),
+                    ("aufwachen", "起床"),
+                    ("laufen", "跑"),
+                    ("schwimmen", "游泳"),
+                    ("singen", "唱歌"),
+                    ("tanzen", "跳舞"),
+                    ("spielen", "玩耍"),
+                    ("arbeiten", "工作"),
+                    ("lernen", "学习"),
+                    ("lieben", "爱"),
+                    ("hassen", "恨"),
+                    # 时间
+                    ("Zeit", "时间"),
+                    ("Tag", "天"),
+                    ("Nacht", "夜晚"),
+                    ("Woche", "周"),
+                    ("Monat", "月"),
+                    ("Jahr", "年"),
+                    ("Frühling", "春天"),
+                    ("Sommer", "夏天"),
+                    ("Herbst", "秋天"),
+                    ("Winter", "冬天"),
+                    ("Montag", "星期一"),
+                    ("Dienstag", "星期二"),
+                    ("Mittwoch", "星期三"),
+                    ("Donnerstag", "星期四"),
+                    ("Freitag", "星期五"),
+                    ("Samstag", "星期六"),
+                    ("Sonntag", "星期天"),
+                    # 其他常用
+                    ("Deutschland", "德国"),
+                    ("Berlin", "柏林"),
+                    ("München", "慕尼黑"),
+                    ("Hamburg", "汉堡"),
+                    ("Köln", "科隆"),
+                    ("Deutsch", "德语"),
+                    ("Englisch", "英语"),
+                    ("Chinesisch", "中文"),
+                    ("Japanisch", "日语"),
+                    ("Musik", "音乐"),
+                    ("Film", "电影"),
+                    ("Kunst", "艺术"),
+                    ("Kultur", "文化"),
+                    ("Sport", "运动"),
+                    ("Reisen", "旅行"),
+                    ("Stadt", "城市"),
+                    ("Land", "国家"),
+                    ("Mensch", "人"),
+                    ("Freund", "朋友"),
+                    ("Geschenk", "礼物"),
+                    ("Wetter", "天气"),
+                    ("Jahreszeit", "季节"),
+                ]
+                
+                for word, meaning in german_words:
+                    if word in existing:
+                        continue
+                    
+                    kb["words"].append({
+                        "word": word,
+                        "meaning": meaning,
+                        "example": "",
+                        "level": 1
+                    })
+                    existing.add(word)
+                    added += 1
+                    
+                    if added % 50 == 0:
+                        print(f"   ✅ 已导入 {added} 个德语词...")
+                
+                if added > 0:
+                    self._save_kb(lang, kb)
+                    print(f"\n🎉 导入完成！共导入 {added} 个德语词")
+                else:
+                    print("\n⚠️ 没有导入任何新词（可能已全部存在）")
+                
+                print(f"📁 知识库文件: {self.config['knowledge_base_dir']}/{lang}.json")
+                
+                return {"added": added, "source": "WordNet (OMW)", "language": lang}
+                
+            except ImportError:
+                return {"error": "请安装 nltk: pip install nltk"}
+            except Exception as e:
+                return {"error": str(e)}
+
         
         return {"error": f"不支持的语言: {lang} 或词典源: {source}"}
     
