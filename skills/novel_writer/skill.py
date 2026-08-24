@@ -449,22 +449,108 @@ class NovelWriterOllama:
         with open(path, 'r', encoding='utf-8') as f:
             content = f.read()
 
-        title_match = re.search(r'[：:]\s*(.+?)(?:\n|$)', content.split('\n')[1] if len(content.split('\n')) > 1 else '')
+        # 1. 解析标题 - 支持多语言
+        title_match = re.search(
+            r'(?:标题|タイトル|Title|Título|Titre|Titel|Titolo|제목|العنوان|ชื่อเรื่อง|शीर्षक)[：:]\s*(.+?)(?:\n|$)',
+            content
+        )
         title = title_match.group(1).strip() if title_match else None
 
-        genre_match = re.search(r'[：:]\s*(.+?)(?:\n|$)', content.split('\n')[2] if len(content.split('\n')) > 2 else '')
+        # 2. 解析类型 - 支持多语言
+        genre_match = re.search(
+            r'(?:类型|ジャンル|Genre|Género|Genre|Genere|장르|النوع|ประเภท|शैली)[：:]\s*(.+?)(?:\n|$)',
+            content
+        )
         genre = genre_match.group(1).strip() if genre_match else None
 
-        words_match = re.search(r'总字数：(\d+)', content)
+        # 3. 解析总字数 - 支持多语言
+        words_match = re.search(
+            r'(?:总字数|総文字数|Total Words|Palabras totales|Mots totaux|Wörter insgesamt|Parole totali|Palavras totais|총 글자수|إجمالي الكلمات|จำนวนคำทั้งหมด|कुल शब्द)[：:]\s*(\d+)',
+            content
+        )
         total_words = int(words_match.group(1)) if words_match else 0
 
-        lang_match = re.search(r'语言：(.+)', content)
+        # 4. 解析语言 - 支持多语言标签
+        lang_patterns = [
+            r'语言[：:]\s*(.+)',
+            r'言語[：:]\s*(.+)',
+            r'Language[：:]\s*(.+)',
+            r'Lingua[：:]\s*(.+)',
+            r'Idioma[：:]\s*(.+)',
+            r'Langue[：:]\s*(.+)',
+            r'Sprache[：:]\s*(.+)',
+            r'Język[：:]\s*(.+)',
+            r'Språk[：:]\s*(.+)',
+            r'Kieli[：:]\s*(.+)',
+            r'Γλώσσα[：:]\s*(.+)',
+            r'שפה[：:]\s*(.+)',
+            r'भाषा[：:]\s*(.+)',
+        ]
+        lang_match = None
+        for pattern in lang_patterns:
+            lang_match = re.search(pattern, content)
+            if lang_match:
+                break
         language = lang_match.group(1).strip() if lang_match else "zh"
 
-        # 解析章节（支持多种语言格式）
-        chapters = []
-        parts = re.split(r'\n(?=第\d+章[：:]|Chapter \d+[:：]|Capítulo \d+[:：]|Chapitre \d+[:：]|Kapitel \d+[:：]|Capitolo \d+[:：]|제\d+장[：:]|الفصل \d+[:：]|บทที่ \d+[:：]|Hoofdstuk \d+[:：]|Rozdział \d+[:：]|Luku \d+[:：]|Κεφάλαιο \d+[:：]|פרק \d+[:：])', content)
+        # 如果语言是 zh 但内容包含其他语言特征，自动修正
+        if language == "zh":
+            if "日本語" in content or "あらすじ" in content or "タイトル" in content:
+                language = "ja"
+            elif "English" in content or "Synopsis" in content:
+                language = "en"
+            elif "Español" in content or "Sinopsis" in content:
+                language = "es"
 
+        # 5. 统计章节数（不解析完整内容，提高性能）
+        chapter_patterns = [
+            r'第\d+章',
+            r'Chapter \d+',
+            r'Capítulo \d+',
+            r'Chapitre \d+',
+            r'Kapitel \d+',
+            r'Capitolo \d+',
+            r'제\d+장',
+            r'الفصل \d+',
+            r'บทที่ \d+',
+            r'Hoofdstuk \d+',
+            r'Rozdział \d+',
+            r'Luku \d+',
+            r'Κεφάλαιο \d+',
+            r'פרק \d+',
+            r'अध्याय \d+',
+        ]
+        chapter_count = 0
+        for pattern in chapter_patterns:
+            chapter_count += len(re.findall(pattern, content, re.IGNORECASE))
+
+        # ✅ 修改：解析章节内容，而不是返回空列表
+        chapters = self._parse_chapters_from_file(filepath)
+    
+        # 6. 返回结果（chapters 为空列表，只用于计数）
+        return {
+            "title": title,
+            "genre": genre,
+            "language": language,
+            "chapters": chapters,              # ✅ 返回解析后的章节内容
+            "chapter_count": chapter_count,  # 新增字段
+            "total_words": total_words,
+            "filepath": str(path)
+        }
+
+    def _parse_chapters_from_file(self, filepath: str) -> List[Dict]:
+        """从文件解析章节内容"""
+        path = Path(filepath)
+        if not path.exists():
+            return []
+        
+        with open(path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        chapters = []
+        # 按章节标记分割
+        parts = re.split(r'\n(?=第\d+章[：:]|Chapter \d+[:：]|Capítulo \d+[:：]|Chapitre \d+[:：]|Kapitel \d+[:：]|Capitolo \d+[:：]|제\d+장[：:]|الفصل \d+[:：]|บทที่ \d+[:：]|Hoofdstuk \d+[:：]|Rozdział \d+[:：]|Luku \d+[:：]|Κεφάλαιο \d+[:：]|פרק \d+[:：])', content)
+        
         patterns = [
             r'第(\d+)章[：:]\s*(.+?)(?:\n|$)',
             r'Chapter (\d+)[：:]\s*(.+?)(?:\n|$)',
@@ -481,7 +567,7 @@ class NovelWriterOllama:
             r'Κεφάλαιο (\d+)[：:]\s*(.+?)(?:\n|$)',
             r'פרק (\d+)[：:]\s*(.+?)(?:\n|$)',
         ]
-
+        
         for part in parts:
             for pattern in patterns:
                 match = re.search(pattern, part)
@@ -499,16 +585,9 @@ class NovelWriterOllama:
                             "content": content_part
                         })
                     break
-
-        return {
-            "title": title,
-            "genre": genre,
-            "language": language,
-            "chapters": chapters,
-            "total_words": total_words,
-            "filepath": str(path)
-        }
-
+        
+        return chapters
+    
     def _save_novel(self, result_data: Dict, is_continue: bool = False) -> str:
         """保存小说到文件 - 使用目标语言的标签"""
         output_dir = Path(self.config.get('output_dir', './generated_novels'))
@@ -678,26 +757,33 @@ class NovelWriterOllama:
                     "error": f"Ollama 服务不可用: {ollama_url}"
                 }
 
+            # ✅ 初始化变量
+            existing_chapters = []
+            start_index = 1
+            chapters_to_generate = chapter_count
+
             # 检查是否是续写模式
             existing_data = None
             if continue_from:
                 existing_data = self._load_existing_novel(continue_from)
                 if existing_data:
                     logger.info(f"📖 加载已有小说: {existing_data['title']}")
-                    logger.info(f"   已有 {len(existing_data['chapters'])} 章，{existing_data['total_words']} 字")
+                    existing_chapter_count = existing_data.get('chapter_count', 0)
+                    existing_chapters = existing_data.get('chapters', [])  # ✅ 获取章节内容
+                    logger.info(f"   已有 {existing_chapter_count} 章，{existing_data['total_words']} 字")
                     genre = existing_data.get('genre', genre)
                     title = existing_data.get('title', title)
                     language = existing_data.get('language', language)
                     lang_config = self._get_lang_config(language)
-                    existing_chapters = existing_data.get('chapters', [])
-                    start_index = len(existing_chapters) + 1
-                    total_needed = chapter_count
-                    chapters_to_generate = total_needed - len(existing_chapters)
+                    
+                    start_index = existing_chapter_count + 1
+                    chapters_to_generate = chapter_count
+                    
                     if chapters_to_generate <= 0:
                         return {
                             "status": "success",
                             "result": existing_data,
-                            "message": f"已有 {len(existing_chapters)} 章，已达到目标章节数 {total_needed}"
+                            "message": f"已有 {existing_chapter_count} 章，已达到目标章节数 {chapter_count}"
                         }
                     logger.info(f"  续写 {chapters_to_generate} 章 (从第 {start_index} 章开始)")
                 else:
@@ -705,10 +791,6 @@ class NovelWriterOllama:
                     existing_chapters = []
                     start_index = 1
                     chapters_to_generate = chapter_count
-            else:
-                existing_chapters = []
-                start_index = 1
-                chapters_to_generate = chapter_count
 
             logger.info(f"开始生成小说: {title} (语言: {lang_name})")
             logger.info(f"  模型: {model}")
@@ -717,8 +799,8 @@ class NovelWriterOllama:
             logger.info(f"  已有章节: {len(existing_chapters)}")
             logger.info(f"  需生成: {chapters_to_generate}")
 
-            all_chapters = existing_chapters.copy()
-            prev_chapters = all_chapters.copy()
+            all_chapters = existing_chapters.copy()  # ✅ 包含已有章节内容
+            prev_chapters = all_chapters.copy()       # ✅ 包含已有章节内容
 
             for i in range(chapters_to_generate):
                 chapter_idx = start_index + i

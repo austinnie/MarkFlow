@@ -50,11 +50,16 @@ class NovelGenerator:
         try:
             with open(novel_file, 'r', encoding='utf-8') as f:
                 content = f.read()
+            # ✅ 调试：打印文件路径和内容前500字符
+            print(f"   📄 读取文件: {novel_file}")
+            print(f"   📄 内容预览: {content[:500]}")
             total = 0
             for pattern in self.get_chapter_patterns():
                 total += len(re.findall(pattern, content, re.IGNORECASE))
+            print(f"   📊 统计到 {total} 章")
             return total
-        except:
+        except Exception as e:
+            print(f"   ❌ 读取失败: {e}")
             return 0
 
     def get_novel_file(self) -> Path:
@@ -152,68 +157,70 @@ class NovelGenerator:
         print(f"🌐 语言：{lang_name} ({self.lang})")
         print()
 
+        if target_chapters is None:
+            target_chapters = DEFAULT_CHAPTERS
+
         novel_file = self.get_novel_file()
         
         if novel_file is None or not novel_file.exists():
-            print(f"📝 首次生成 {lang_name} 语言 3 章...")
-            try:
-                result = execute_skill(
-                    "novel_writer",
-                    genre=self.config.get("genre"),       # ✅ 无默认值
-                    title=self.config.get("title"),       # ✅ 无默认值
-                    outline=self.config.get("outline", ""),
-                    characters=self.config.get("characters", ""),
-                    chapter_count=DEFAULT_CHAPTERS,
-                    model=DEFAULT_MODEL,
-                    continue_from="",
-                    language=self.lang
-                )
-                if result is None:
-                    print("❌ 生成失败")
-                    return
-                novel_file = self.get_novel_file()
-            except Exception as e:
-                print(f"❌ 生成失败: {e}")
-                import traceback
-                traceback.print_exc()
-                return
+            print(f"📝 首次生成 {lang_name} 语言 {target_chapters} 章...")
+            result = execute_skill(
+                "novel_writer",
+                genre=self.config.get("genre"),
+                title=self.config.get("title"),
+                outline=self.config.get("outline", ""),
+                characters=self.config.get("characters", ""),
+                chapter_count=target_chapters,
+                model=DEFAULT_MODEL,
+                continue_from="",
+                language=self.lang
+            )
+        else:
+            current = self.get_current_chapters(novel_file)
+            target_total = current + target_chapters
+            print(f"📝 从 {current} 章追加 {target_chapters} 章到 {target_total} 章...")
+            result = execute_skill(
+                "novel_writer",
+                genre=self.config.get("genre"),
+                title=self.config.get("title"),
+                outline=self.config.get("outline", ""),
+                characters=self.config.get("characters", ""),
+                chapter_count=target_chapters,
+                model=DEFAULT_MODEL,
+                continue_from=str(novel_file),
+                language=self.lang
+            )
         
+        if result is None:
+            print("❌ 生成失败")
+            return
+        
+        novel_file = self.get_novel_file()
         if novel_file is None:
             print("❌ 未找到小说文件")
             return
-        
-        current = self.get_current_chapters(novel_file)
-        if target_chapters is None:
-            target_chapters = current + DEFAULT_CHAPTERS
-        
-        print(f"📖 当前：{current} 章 → 目标：{target_chapters} 章")
-        if not self.continue_novel(novel_file, target_chapters):
-            return
 
+        # ✅ 生成有声书
         self.generate_audiobook(novel_file)
 
-        final_chapters = self.get_current_chapters(novel_file)
         print("\n" + "=" * 60)
         print("   ✅ 完成！")
         print("=" * 60)
         print()
         print(f"   📖 小说：{novel_file}")
-        print(f"   📊 章节：{final_chapters} 章")
+        print(f"   📊 章节：{self.get_current_chapters(novel_file)} 章")
         print(f"   🎤 有声书：{self.audio_dir}/{novel_file.stem}.mp3")
         print()
-
-
+    
 def main():
     parser = argparse.ArgumentParser(
-        description="小说生成器 - 多语言版本",
-        epilog="示例：python novel_generator.py 6 --lang ja   # 生成6章日语小说"
+        description="小说生成器 - 多语言版本"
     )
     parser.add_argument(
-        "chapters", 
-        nargs="?", 
-        type=int, 
-        default=None,
-        help="目标章节数（默认在当前基础上+3）"
+        "--chapters", "-c",
+        type=int,
+        default=3,
+        help="目标章节数 (默认: 3)"
     )
     parser.add_argument(
         "--lang", "-l",
@@ -221,12 +228,9 @@ def main():
         default="zh",
         help="语言代码 (zh/en/ja/es/fr/de/it/pt/ko/ar/th/nl/pl/sv/fi/el/he/hi)"
     )
-    
     args = parser.parse_args()
-    
     generator = NovelGenerator(lang=args.lang)
-    generator.run(args.chapters)
-
-
+    generator.run(target_chapters=args.chapters)
+    
 if __name__ == "__main__":
     main()
