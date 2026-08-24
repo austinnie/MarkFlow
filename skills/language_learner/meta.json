@@ -56,7 +56,7 @@
     {"name": "translation", "description": "翻译结果"},
     {"name": "stats", "description": "学习统计"}
   ],
-  "dependencies": ["edge-tts"],
+  "dependencies": ["nltk", "edge-tts", "requests", "jamdict", "jieba"],
   "tags": ["学习", "语言", "教育", "AI"],
   "difficulty": "⭐⭐⭐"
 }

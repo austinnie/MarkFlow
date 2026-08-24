@@ -20,7 +20,7 @@ MarkFlow 是一个轻量级的技能生成框架，让你用 **Markdown** 编写
 
 ## 📦 已安装技能
 
-共 **8** 个技能：
+共 **10** 个技能：
 
 | 技能 | 描述 | 版本 |
 |------|------|------|
@@ -28,7 +28,9 @@ MarkFlow 是一个轻量级的技能生成框架，让你用 **Markdown** 编写
 | `doc_generator` | 代码文档自动生成器，从 Python 代码自动生成 API 文档 | 1.0.0 |
 | `image_toolbox` | 图片批量处理工具箱 | 1.0.0 |
 | `image_viewer` | 功能完整的图片查看器和管理器，替代 Windows 自带图片查看器 | 1.0.0 |
+| `language_learner` | AI 驱动的多语言学习助手，支持单词、语法、句子学习，集成语音发音 | 1.0.0 |
 | `music_player` | AI 智能歌单生成和音乐管理 | 1.0.0 |
+| `news_aggregator` | RSS 新闻抓取 + AI 摘要生成 | 1.0.0 |
 | `novel_writer` | 使用本地 Ollama 大模型自动写小说 | 1.0.0 |
 | `sd_image_generator` | 使用本地 Stable Diffusion 模型生成图片的技能 | 1.0.0 |
 | `voice_assistant` | 语音合成（TTS）和语音识别（STT）助手 | 1.0.0 |
@@ -159,7 +161,17 @@ MarkFlow/
 │   │   ├── meta.json             # 元数据
 │   │   ├── skill.md              # 技能文档
 │   │   └── output/               # 输出目录
+│   ├── language_learner/                 # 语言学习助手
+│   │   ├── skill.py              # 可执行代码
+│   │   ├── meta.json             # 元数据
+│   │   ├── skill.md              # 技能文档
+│   │   └── output/               # 输出目录
 │   ├── music_player/                 # 音乐播放器
+│   │   ├── skill.py              # 可执行代码
+│   │   ├── meta.json             # 元数据
+│   │   ├── skill.md              # 技能文档
+│   │   └── output/               # 输出目录
+│   ├── news_aggregator/                 # 新闻聚合器
 │   │   ├── skill.py              # 可执行代码
 │   │   ├── meta.json             # 元数据
 │   │   ├── skill.md              # 技能文档
@@ -303,6 +315,6 @@ python -m markflow.gui
 
 ---
 
-*文档自动生成于 2026-08-24 00:01:53*
+*文档自动生成于 2026-08-24 17:05:31*
 
 Made with ❤️ by MarkFlow Team
