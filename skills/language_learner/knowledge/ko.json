@@ -1,0 +1,107 @@
+{
+  "name": "韩语",
+  "code": "ko",
+  "voice": "ko-KR-SunHiNeural",
+  "words": [
+    {
+      "word": "안녕하세요",
+      "meaning": "你好",
+      "example": "안녕하세요, 반갑습니다.",
+      "level": 1
+    },
+    {
+      "word": "감사합니다",
+      "meaning": "谢谢",
+      "example": "감사합니다!",
+      "level": 1
+    },
+    {
+      "word": "죄송합니다",
+      "meaning": "对不起",
+      "example": "죄송합니다.",
+      "level": 1
+    },
+    {
+      "word": "네",
+      "meaning": "是的",
+      "example": "네, 알겠습니다.",
+      "level": 1
+    },
+    {
+      "word": "아니요",
+      "meaning": "不是",
+      "example": "아니요, 괜찮아요.",
+      "level": 1
+    },
+    {
+      "word": "사랑해요",
+      "meaning": "我爱你",
+      "example": "사랑해요.",
+      "level": 2
+    },
+    {
+      "word": "고마워요",
+      "meaning": "谢谢(非正式)",
+      "example": "고마워요!",
+      "level": 2
+    },
+    {
+      "word": "괜찮아요",
+      "meaning": "没关系",
+      "example": "괜찮아요.",
+      "level": 2
+    }
+  ],
+  "sentences": [
+    {
+      "en": "안녕하세요!",
+      "zh": "你好！",
+      "level": 1
+    },
+    {
+      "en": "어떻게 지내세요?",
+      "zh": "你好吗？",
+      "level": 1
+    },
+    {
+      "en": "이름이 뭐예요?",
+      "zh": "你叫什么名字？",
+      "level": 1
+    },
+    {
+      "en": "감사합니다!",
+      "zh": "谢谢！",
+      "level": 1
+    },
+    {
+      "en": "도와주세요!",
+      "zh": "请帮帮我！",
+      "level": 2
+    },
+    {
+      "en": "한국어를 공부하고 있어요.",
+      "zh": "我在学习韩语。",
+      "level": 2
+    }
+  ],
+  "grammar": [
+    {
+      "title": "基本语序",
+      "rule": "主语 + 宾语 + 动词 (SOV)",
+      "example": "나는 밥을 먹어요。",
+      "level": 1
+    },
+    {
+      "title": "敬语终结",
+      "rule": "动词词干 + 아/어요",
+      "example": "먹어요 / 해요",
+      "level": 1
+    },
+    {
+      "title": "过去时",
+      "rule": "动词词干 + 았/었어요",
+      "example": "했어요 / 먹었어요",
+      "level": 2
+    }
+  ]
+}

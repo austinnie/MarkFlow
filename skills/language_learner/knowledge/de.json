@@ -1,0 +1,90 @@
+{
+  "name": "德语",
+  "code": "de",
+  "voice": "de-DE-KatjaNeural",
+  "words": [
+    {
+      "word": "Hallo",
+      "meaning": "你好",
+      "example": "Hallo, wie geht es dir?",
+      "level": 1
+    },
+    {
+      "word": "Danke",
+      "meaning": "谢谢",
+      "example": "Danke schön!",
+      "level": 1
+    },
+    {
+      "word": "Tschüss",
+      "meaning": "再见",
+      "example": "Tschüss!",
+      "level": 1
+    },
+    {
+      "word": "Ja",
+      "meaning": "是的",
+      "example": "Ja, ich verstehe.",
+      "level": 1
+    },
+    {
+      "word": "Nein",
+      "meaning": "不是",
+      "example": "Nein, nicht einverstanden.",
+      "level": 1
+    },
+    {
+      "word": "Bitte",
+      "meaning": "请",
+      "example": "Bitte, hilf mir.",
+      "level": 1
+    },
+    {
+      "word": "Ich liebe dich",
+      "meaning": "我爱你",
+      "example": "Ich liebe dich.",
+      "level": 2
+    }
+  ],
+  "sentences": [
+    {
+      "en": "Hallo!",
+      "zh": "你好！",
+      "level": 1
+    },
+    {
+      "en": "Wie geht es dir?",
+      "zh": "你好吗？",
+      "level": 1
+    },
+    {
+      "en": "Ich heiße...",
+      "zh": "我叫...",
+      "level": 1
+    },
+    {
+      "en": "Danke schön!",
+      "zh": "非常感谢！",
+      "level": 1
+    },
+    {
+      "en": "Kannst du mir helfen?",
+      "zh": "你能帮我吗？",
+      "level": 2
+    }
+  ],
+  "grammar": [
+    {
+      "title": "主谓结构",
+      "rule": "主语 + 动词 + 宾语",
+      "example": "Ich spreche Deutsch.",
+      "level": 1
+    },
+    {
+      "title": "否定句",
+      "rule": "主语 + 动词 + nicht",
+      "example": "Ich spreche nicht Englisch.",
+      "level": 2
+    }
+  ]
+}

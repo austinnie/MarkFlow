@@ -1,0 +1,90 @@
+{
+  "name": "西班牙语",
+  "code": "es",
+  "voice": "es-ES-ElviraNeural",
+  "words": [
+    {
+      "word": "Hola",
+      "meaning": "你好",
+      "example": "Hola, ¿cómo estás?",
+      "level": 1
+    },
+    {
+      "word": "Gracias",
+      "meaning": "谢谢",
+      "example": "¡Muchas gracias!",
+      "level": 1
+    },
+    {
+      "word": "Adiós",
+      "meaning": "再见",
+      "example": "Adiós!",
+      "level": 1
+    },
+    {
+      "word": "Sí",
+      "meaning": "是的",
+      "example": "Sí, entiendo.",
+      "level": 1
+    },
+    {
+      "word": "No",
+      "meaning": "不是",
+      "example": "No, no estoy de acuerdo.",
+      "level": 1
+    },
+    {
+      "word": "Por favor",
+      "meaning": "请",
+      "example": "Por favor.",
+      "level": 1
+    },
+    {
+      "word": "Te quiero",
+      "meaning": "我爱你",
+      "example": "Te quiero.",
+      "level": 2
+    }
+  ],
+  "sentences": [
+    {
+      "en": "¡Hola!",
+      "zh": "你好！",
+      "level": 1
+    },
+    {
+      "en": "¿Cómo estás?",
+      "zh": "你好吗？",
+      "level": 1
+    },
+    {
+      "en": "Me llamo...",
+      "zh": "我叫...",
+      "level": 1
+    },
+    {
+      "en": "¡Muchas gracias!",
+      "zh": "非常感谢！",
+      "level": 1
+    },
+    {
+      "en": "¿Puedes ayudarme?",
+      "zh": "你能帮我吗？",
+      "level": 2
+    }
+  ],
+  "grammar": [
+    {
+      "title": "主谓结构",
+      "rule": "主语 + 动词 + 宾语",
+      "example": "Yo hablo español.",
+      "level": 1
+    },
+    {
+      "title": "否定句",
+      "rule": "主语 + no + 动词",
+      "example": "Yo no hablo inglés.",
+      "level": 2
+    }
+  ]
+}

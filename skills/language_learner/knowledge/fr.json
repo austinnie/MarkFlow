@@ -1,0 +1,90 @@
+{
+  "name": "法语",
+  "code": "fr",
+  "voice": "fr-FR-DeniseNeural",
+  "words": [
+    {
+      "word": "Bonjour",
+      "meaning": "你好",
+      "example": "Bonjour, comment allez-vous?",
+      "level": 1
+    },
+    {
+      "word": "Merci",
+      "meaning": "谢谢",
+      "example": "Merci beaucoup!",
+      "level": 1
+    },
+    {
+      "word": "Au revoir",
+      "meaning": "再见",
+      "example": "Au revoir!",
+      "level": 1
+    },
+    {
+      "word": "Oui",
+      "meaning": "是的",
+      "example": "Oui, je comprends.",
+      "level": 1
+    },
+    {
+      "word": "Non",
+      "meaning": "不是",
+      "example": "Non, je ne suis pas d'accord.",
+      "level": 1
+    },
+    {
+      "word": "S'il vous plaît",
+      "meaning": "请",
+      "example": "S'il vous plaît.",
+      "level": 1
+    },
+    {
+      "word": "Je t'aime",
+      "meaning": "我爱你",
+      "example": "Je t'aime.",
+      "level": 2
+    }
+  ],
+  "sentences": [
+    {
+      "en": "Bonjour!",
+      "zh": "你好！",
+      "level": 1
+    },
+    {
+      "en": "Comment allez-vous?",
+      "zh": "你好吗？",
+      "level": 1
+    },
+    {
+      "en": "Je m'appelle...",
+      "zh": "我叫...",
+      "level": 1
+    },
+    {
+      "en": "Merci beaucoup!",
+      "zh": "非常感谢！",
+      "level": 1
+    },
+    {
+      "en": "Pouvez-vous m'aider?",
+      "zh": "你能帮我吗？",
+      "level": 2
+    }
+  ],
+  "grammar": [
+    {
+      "title": "主谓结构",
+      "rule": "主语 + 动词 + 宾语",
+      "example": "Je parle français.",
+      "level": 1
+    },
+    {
+      "title": "否定句",
+      "rule": "主语 + ne + 动词 + pas",
+      "example": "Je ne parle pas anglais.",
+      "level": 2
+    }
+  ]
+}
