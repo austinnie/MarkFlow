@@ -50,18 +50,39 @@ class NovelGenerator:
         try:
             with open(novel_file, 'r', encoding='utf-8') as f:
                 content = f.read()
-            # ✅ 调试：打印文件路径和内容前500字符
             print(f"   📄 读取文件: {novel_file}")
             print(f"   📄 内容预览: {content[:500]}")
+            
+            # ✅ 多语言章节标题匹配（行首）
+            patterns = [
+                r'^第\d+章[：:]\s*.+$',           # 中文/日语
+                r'^Chapter \d+[：:]\s*.+$',        # 英语
+                r'^Capítulo \d+[：:]\s*.+$',       # 西班牙语
+                r'^Chapitre \d+[：:]\s*.+$',       # 法语
+                r'^Kapitel \d+[：:]\s*.+$',        # 德语
+                r'^Capitolo \d+[：:]\s*.+$',       # 意大利语
+                r'^제\d+장[：:]\s*.+$',             # 韩语
+                r'^الفصل \d+[：:]\s*.+$',          # 阿拉伯语
+                r'^บทที่ \d+[：:]\s*.+$',          # 泰语
+                r'^Hoofdstuk \d+[：:]\s*.+$',      # 荷兰语
+                r'^Rozdzia\u0142 \d+[：:]\s*.+$',  # 波兰语
+                r'^Luku \d+[：:]\s*.+$',           # 芬兰语
+                r'^Κεφάλαιο \d+[：:]\s*.+$',      # 希腊语
+                r'^פרק \d+[：:]\s*.+$',            # 希伯来语
+                r'^अध्याय \d+[：:]\s*.+$',        # 印地语
+            ]
+            
             total = 0
-            for pattern in self.get_chapter_patterns():
-                total += len(re.findall(pattern, content, re.IGNORECASE))
+            for pattern in patterns:
+                matches = re.findall(pattern, content, re.MULTILINE | re.IGNORECASE)
+                total += len(matches)
+            
             print(f"   📊 统计到 {total} 章")
             return total
         except Exception as e:
             print(f"   ❌ 读取失败: {e}")
             return 0
-
+        
     def get_novel_file(self) -> Path:
         """
         获取当前语言的小说文件

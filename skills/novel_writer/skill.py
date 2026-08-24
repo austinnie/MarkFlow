@@ -502,42 +502,22 @@ class NovelWriterOllama:
             elif "Español" in content or "Sinopsis" in content:
                 language = "es"
 
-        # 5. 统计章节数（不解析完整内容，提高性能）
-        chapter_patterns = [
-            r'第\d+章',
-            r'Chapter \d+',
-            r'Capítulo \d+',
-            r'Chapitre \d+',
-            r'Kapitel \d+',
-            r'Capitolo \d+',
-            r'제\d+장',
-            r'الفصل \d+',
-            r'บทที่ \d+',
-            r'Hoofdstuk \d+',
-            r'Rozdział \d+',
-            r'Luku \d+',
-            r'Κεφάλαιο \d+',
-            r'פרק \d+',
-            r'अध्याय \d+',
-        ]
-        chapter_count = 0
-        for pattern in chapter_patterns:
-            chapter_count += len(re.findall(pattern, content, re.IGNORECASE))
-
-        # ✅ 修改：解析章节内容，而不是返回空列表
+        # ✅ 解析章节内容
         chapters = self._parse_chapters_from_file(filepath)
-    
-        # 6. 返回结果（chapters 为空列表，只用于计数）
+        
+        # ✅ 使用 len(chapters) 作为章节数，而不是正则统计
+        chapter_count = len(chapters)
+
         return {
             "title": title,
             "genre": genre,
             "language": language,
-            "chapters": chapters,              # ✅ 返回解析后的章节内容
-            "chapter_count": chapter_count,  # 新增字段
+            "chapters": chapters,
+            "chapter_count": chapter_count,  # ✅ 与 chapters 数量一致
             "total_words": total_words,
             "filepath": str(path)
         }
-
+    
     def _parse_chapters_from_file(self, filepath: str) -> List[Dict]:
         """从文件解析章节内容"""
         path = Path(filepath)
@@ -548,35 +528,62 @@ class NovelWriterOllama:
             content = f.read()
         
         chapters = []
-        # 按章节标记分割
+        
+        # 使用更精确的分割：匹配行首的章节标记
         parts = re.split(r'\n(?=第\d+章[：:]|Chapter \d+[:：]|Capítulo \d+[:：]|Chapitre \d+[:：]|Kapitel \d+[:：]|Capitolo \d+[:：]|제\d+장[：:]|الفصل \d+[:：]|บทที่ \d+[:：]|Hoofdstuk \d+[:：]|Rozdział \d+[:：]|Luku \d+[:：]|Κεφάλαιο \d+[:：]|פרק \d+[:：])', content)
         
+        # 多语言章节匹配模式
         patterns = [
-            r'第(\d+)章[：:]\s*(.+?)(?:\n|$)',
-            r'Chapter (\d+)[：:]\s*(.+?)(?:\n|$)',
-            r'Capítulo (\d+)[：:]\s*(.+?)(?:\n|$)',
-            r'Chapitre (\d+)[：:]\s*(.+?)(?:\n|$)',
-            r'Kapitel (\d+)[：:]\s*(.+?)(?:\n|$)',
-            r'Capitolo (\d+)[：:]\s*(.+?)(?:\n|$)',
-            r'제(\d+)장[：:]\s*(.+?)(?:\n|$)',
-            r'الفصل (\d+)[：:]\s*(.+?)(?:\n|$)',
-            r'บทที่ (\d+)[：:]\s*(.+?)(?:\n|$)',
-            r'Hoofdstuk (\d+)[：:]\s*(.+?)(?:\n|$)',
-            r'Rozdział (\d+)[：:]\s*(.+?)(?:\n|$)',
-            r'Luku (\d+)[：:]\s*(.+?)(?:\n|$)',
-            r'Κεφάλαιο (\d+)[：:]\s*(.+?)(?:\n|$)',
-            r'פרק (\d+)[：:]\s*(.+?)(?:\n|$)',
+            (r'第(\d+)章[：:]\s*(.+?)(?:\n|$)', 'zh/ja'),
+            (r'Chapter (\d+)[：:]\s*(.+?)(?:\n|$)', 'en'),
+            (r'Capítulo (\d+)[：:]\s*(.+?)(?:\n|$)', 'es'),
+            (r'Chapitre (\d+)[：:]\s*(.+?)(?:\n|$)', 'fr'),
+            (r'Kapitel (\d+)[：:]\s*(.+?)(?:\n|$)', 'de'),
+            (r'Capitolo (\d+)[：:]\s*(.+?)(?:\n|$)', 'it'),
+            (r'제(\d+)장[：:]\s*(.+?)(?:\n|$)', 'ko'),
+            (r'الفصل (\d+)[：:]\s*(.+?)(?:\n|$)', 'ar'),
+            (r'บทที่ (\d+)[：:]\s*(.+?)(?:\n|$)', 'th'),
+            (r'Hoofdstuk (\d+)[：:]\s*(.+?)(?:\n|$)', 'nl'),
+            (r'Rozdział (\d+)[：:]\s*(.+?)(?:\n|$)', 'pl'),
+            (r'Luku (\d+)[：:]\s*(.+?)(?:\n|$)', 'fi'),
+            (r'Κεφάλαιο (\d+)[：:]\s*(.+?)(?:\n|$)', 'el'),
+            (r'פרק (\d+)[：:]\s*(.+?)(?:\n|$)', 'he'),
         ]
         
         for part in parts:
-            for pattern in patterns:
+            # 跳过空内容
+            if not part.strip():
+                continue
+            
+            # 尝试匹配所有模式
+            matched = False
+            for pattern, _ in patterns:
                 match = re.search(pattern, part)
                 if match:
                     idx = int(match.group(1))
                     title_text = match.group(2).strip()
-                    content_part = re.sub(r'^###\s*.+?\n', '', part, flags=re.MULTILINE)
-                    content_part = re.sub(r'^.{0,20}章[：:].+?\n', '', content_part, flags=re.MULTILINE)
+                    
+                    # 提取内容：移除章节标题行和分隔线
+                    content_part = part
+                    # 移除标题行
+                    content_part = re.sub(r'^第\d+章[：:]\s*.+?\n', '', content_part, flags=re.MULTILINE)
+                    content_part = re.sub(r'^Chapter \d+[：:]\s*.+?\n', '', content_part, flags=re.MULTILINE)
+                    content_part = re.sub(r'^Capítulo \d+[：:]\s*.+?\n', '', content_part, flags=re.MULTILINE)
+                    content_part = re.sub(r'^Chapitre \d+[：:]\s*.+?\n', '', content_part, flags=re.MULTILINE)
+                    content_part = re.sub(r'^Kapitel \d+[：:]\s*.+?\n', '', content_part, flags=re.MULTILINE)
+                    content_part = re.sub(r'^Capitolo \d+[：:]\s*.+?\n', '', content_part, flags=re.MULTILINE)
+                    content_part = re.sub(r'^제\d+장[：:]\s*.+?\n', '', content_part, flags=re.MULTILINE)
+                    content_part = re.sub(r'^الفصل \d+[：:]\s*.+?\n', '', content_part, flags=re.MULTILINE)
+                    content_part = re.sub(r'^บทที่ \d+[：:]\s*.+?\n', '', content_part, flags=re.MULTILINE)
+                    content_part = re.sub(r'^Hoofdstuk \d+[：:]\s*.+?\n', '', content_part, flags=re.MULTILINE)
+                    content_part = re.sub(r'^Rozdzia\u0142 \d+[：:]\s*.+?\n', '', content_part, flags=re.MULTILINE)
+                    content_part = re.sub(r'^Luku \d+[：:]\s*.+?\n', '', content_part, flags=re.MULTILINE)
+                    content_part = re.sub(r'^Κεφάλαιο \d+[：:]\s*.+?\n', '', content_part, flags=re.MULTILINE)
+                    content_part = re.sub(r'^פרק \d+[：:]\s*.+?\n', '', content_part, flags=re.MULTILINE)
+                    
+                    # 移除分隔线
                     content_part = re.sub(r'^-{40,}\n', '', content_part, flags=re.MULTILINE)
+                    
                     content_part = content_part.strip()
                     if content_part:
                         chapters.append({
@@ -584,7 +591,12 @@ class NovelWriterOllama:
                             "title": title_text,
                             "content": content_part
                         })
+                    matched = True
                     break
+            
+            # 如果没有匹配到任何模式，继续下一个
+            if not matched:
+                continue
         
         return chapters
     
@@ -757,19 +769,19 @@ class NovelWriterOllama:
                     "error": f"Ollama 服务不可用: {ollama_url}"
                 }
 
-            # ✅ 初始化变量
+            # 检查是否是续写模式
+            existing_data = None
             existing_chapters = []
             start_index = 1
             chapters_to_generate = chapter_count
+            target_total = chapter_count  # ✅ 默认为 chapter_count（首次生成时）
 
-            # 检查是否是续写模式
-            existing_data = None
             if continue_from:
                 existing_data = self._load_existing_novel(continue_from)
                 if existing_data:
                     logger.info(f"📖 加载已有小说: {existing_data['title']}")
                     existing_chapter_count = existing_data.get('chapter_count', 0)
-                    existing_chapters = existing_data.get('chapters', [])  # ✅ 获取章节内容
+                    existing_chapters = existing_data.get('chapters', [])
                     logger.info(f"   已有 {existing_chapter_count} 章，{existing_data['total_words']} 字")
                     genre = existing_data.get('genre', genre)
                     title = existing_data.get('title', title)
@@ -777,7 +789,8 @@ class NovelWriterOllama:
                     lang_config = self._get_lang_config(language)
                     
                     start_index = existing_chapter_count + 1
-                    chapters_to_generate = chapter_count
+                    chapters_to_generate = chapter_count  # ✅ chapter_count 是追加的章数
+                    target_total = existing_chapter_count + chapter_count  # ✅ 计算目标总章数
                     
                     if chapters_to_generate <= 0:
                         return {
@@ -785,29 +798,30 @@ class NovelWriterOllama:
                             "result": existing_data,
                             "message": f"已有 {existing_chapter_count} 章，已达到目标章节数 {chapter_count}"
                         }
-                    logger.info(f"  续写 {chapters_to_generate} 章 (从第 {start_index} 章开始)")
+                    logger.info(f"  续写 {chapters_to_generate} 章 (从第 {start_index} 章到 {target_total} 章)")
                 else:
                     logger.warning(f"未找到续写文件: {continue_from}，将从头开始生成")
                     existing_chapters = []
                     start_index = 1
                     chapters_to_generate = chapter_count
+                    target_total = chapter_count
 
             logger.info(f"开始生成小说: {title} (语言: {lang_name})")
             logger.info(f"  模型: {model}")
             logger.info(f"  类型: {genre}")
-            logger.info(f"  总章节数: {chapter_count}")
+            logger.info(f"  总章节数: {target_total}")  # ✅ 显示目标总章数
             logger.info(f"  已有章节: {len(existing_chapters)}")
             logger.info(f"  需生成: {chapters_to_generate}")
 
-            all_chapters = existing_chapters.copy()  # ✅ 包含已有章节内容
-            prev_chapters = all_chapters.copy()       # ✅ 包含已有章节内容
+            all_chapters = existing_chapters.copy()
+            prev_chapters = all_chapters.copy()
 
             for i in range(chapters_to_generate):
                 chapter_idx = start_index + i
-                logger.info(f"  生成第 {chapter_idx}/{chapter_count} 章...")
+                logger.info(f"  生成第 {chapter_idx}/{target_total} 章...")  # ✅ 显示正确的总章数
                 chapter = self._generate_chapter(
                     ollama_url, model, genre, title, outline, characters,
-                    chapter_idx, chapter_count, style, temperature,
+                    chapter_idx, target_total, style, temperature,  # ✅ 传入 target_total
                     lang_config, prev_chapters
                 )
                 all_chapters.append(chapter)
