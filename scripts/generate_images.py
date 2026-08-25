@@ -1,21 +1,16 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-SD 图片批量生成器 - 配置文件版
-用法：
-  python generate_images.py                    # 生成所有方案
-  python generate_images.py --list             # 列出所有方案
-  python generate_images.py --id 1             # 只生成第 1 组
-  python generate_images.py --ids 1,3,5        # 生成指定的组
-  python generate_images.py --config custom.json # 使用自定义配置
+SD 图片批量生成器 - 支持 JSON + Python 配置
 """
 
 import sys
 import json
 import argparse
 import time
+import importlib.util
 from pathlib import Path
-from datetime import datetime
+from typing import Dict, List, Optional, Set
 
 # 添加项目根目录到 sys.path
 project_root = Path(__file__).parent.parent
@@ -25,135 +20,750 @@ if str(project_root) not in sys.path:
 from markflow.cli.commands import execute_skill
 
 
-class SDImageGenerator:
-    def __init__(self, config_path: str = None):
-        self.base_dir = Path(__file__).parent.parent
-        self.config = self._load_config(config_path)
-        self.output_dir = Path(self.config.get("output_dir", "./skills/sd_image_generator/output/images"))
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.schemes = self.config.get("schemes", [])
-        self.default_params = self.config.get("default_params", {})
-
-    def _load_config(self, config_path: str = None):
-        """加载配置文件"""
-        if config_path is None:
-            config_path = Path(__file__).parent / "configs" / "girls_config.json"
-        else:
-            config_path = Path(config_path)
-
-        if not config_path.exists():
-            print(f"❌ 配置文件不存在: {config_path}")
-            print("   请确保 configs/girls_config.json 存在")
-            sys.exit(1)
-
+class PromptLoader:
+    """Prompt 加载器 - 支持 JSON 和 Python 配置"""
+    
+    EXCLUDED_FILES: Set[str] = {
+        "dynamic_prompt.py",
+        "__init__.py",
+    }
+    
+    @staticmethod
+    def find_prompts_dir(source: str = None) -> Optional[Path]:
+        """查找 prompts 目录"""
+        script_dir = Path(__file__).parent
+        
+        if source:
+            source = source.strip().rstrip('/\\')
+            source_path = Path(source)
+            
+            if source_path.is_absolute():
+                if source_path.exists() and source_path.is_dir():
+                    return source_path.absolute()
+                if source_path.exists() and source_path.is_file():
+                    return source_path.parent.absolute()
+            
+            cwd_path = Path.cwd() / source
+            if cwd_path.exists():
+                return cwd_path.absolute()
+            
+            script_path = script_dir / source
+            if script_path.exists():
+                return script_path.absolute()
+            
+            project_path = project_root / source
+            if project_path.exists():
+                return project_path.absolute()
+        
+        candidates = [
+            script_dir / "configs" / "prompts",
+            script_dir / "configs" / "prompts_new",
+            project_root / "scripts" / "configs" / "prompts",
+            project_root / "scripts" / "configs" / "prompts_new",
+            project_root / "configs" / "prompts",
+            project_root / "configs" / "prompts_new",
+            project_root / "tools" / "prompts",
+            project_root / "tools" / "prompts_new",
+            project_root / "prompts",
+            project_root / "prompts_new",
+        ]
+        
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_dir():
+                return candidate.absolute()
+        
+        return None
+    
+    @staticmethod
+    def resolve_source(source: str) -> Optional[Path]:
+        """解析 source 参数，返回实际路径"""
+        source = source.strip().rstrip('/\\')
+        source_path = Path(source)
+        script_dir = Path(__file__).parent
+        
+        if source_path.is_absolute():
+            if source_path.exists():
+                return source_path.absolute()
+            return None
+        
+        cwd_path = Path.cwd() / source
+        if cwd_path.exists():
+            return cwd_path.absolute()
+        
+        script_path = script_dir / source
+        if script_path.exists():
+            return script_path.absolute()
+        
+        project_path = project_root / source
+        if project_path.exists():
+            return project_path.absolute()
+        
+        prompts_dir = PromptLoader.find_prompts_dir()
+        if prompts_dir:
+            file_path = prompts_dir / f"{source}.py"
+            if file_path.exists():
+                return file_path.absolute()
+            
+            sub_dir = prompts_dir / source
+            if sub_dir.exists() and sub_dir.is_dir():
+                return sub_dir.absolute()
+            
+            for py_file in prompts_dir.rglob('*.py'):
+                if py_file.stem == source and not py_file.name.startswith('_'):
+                    return py_file.absolute()
+        
+        if source_path.exists():
+            return source_path.absolute()
+        
+        return None
+    
+    @staticmethod
+    def load_json(config_path: Path) -> List[Dict]:
+        """加载 JSON 配置文件"""
         with open(config_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            data = json.load(f)
+        
+        schemes = []
+        default_params = data.get('default_params', {})
+        
+        for scheme in data.get('schemes', []):
+            schemes.append({
+                'id': scheme.get('id', len(schemes) + 1),
+                'name': scheme.get('name', f'scheme_{scheme["id"]}'),
+                'prompts': [scheme.get('prompt', '')],
+                'negative_prompt': scheme.get('negative_prompt', ''),
+                'params': {
+                    'width': scheme.get('width', default_params.get('width', 512)),
+                    'height': scheme.get('height', default_params.get('height', 768)),
+                    'steps': scheme.get('steps', default_params.get('steps', 30)),
+                    'cfg_scale': scheme.get('cfg_scale', default_params.get('cfg_scale', 7.5)),
+                    'seed': scheme.get('seed', default_params.get('seed', -1)),
+                    'batch_size': scheme.get('batch_size', default_params.get('batch_size', 1)),
+                    'model': scheme.get('model', default_params.get('model', 'anytimeRealistic_v10.safetensors'))
+                },
+                'source': 'json'
+            })
+        
+        return schemes
+    
+    @staticmethod
+    def is_excluded(file_path: Path) -> bool:
+        """检查文件是否应该被排除"""
+        return file_path.name in PromptLoader.EXCLUDED_FILES
+    
+    @staticmethod
+    def load_python_file(file_path: Path) -> Dict:
+        """加载 Python prompt 文件"""
+        try:
+            spec = importlib.util.spec_from_file_location("style_module", file_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            
+            if hasattr(module, 'STYLE'):
+                return getattr(module, 'STYLE')
+            return {}
+        except Exception as e:
+            return {}
+    
+    @staticmethod
+    def load_python_directory(dir_path: Path, recursive: bool = True, 
+                              style_filter: str = None, folder_filter: str = None) -> Dict[str, Dict]:
+        """加载目录下所有 Python prompt 文件，支持过滤"""
+        all_styles = {}
+        
+        if recursive:
+            py_files = list(dir_path.rglob('*.py'))
+        else:
+            py_files = list(dir_path.glob('*.py'))
+        
+        py_files = [f for f in py_files if not PromptLoader.is_excluded(f)]
+        
+        if not py_files:
+            print(f"⚠️ 在 {dir_path} 中未找到任何 .py 文件")
+            return all_styles
+        
+        loaded_count = 0
+        
+        for py_file in py_files:
+            try:
+                styles = PromptLoader.load_python_file(py_file)
+                if styles:
+                    # 应用过滤器
+                    for style_name, style_data in styles.items():
+                        # 风格名过滤
+                        if style_filter and style_filter not in style_name:
+                            continue
+                        # 文件夹名过滤
+                        if folder_filter and folder_filter not in style_data.get('folder', ''):
+                            continue
+                        all_styles[style_name] = style_data
+                        loaded_count += 1
+                        if loaded_count <= 5:
+                            try:
+                                rel_path = py_file.relative_to(dir_path)
+                                print(f"  ✓ {rel_path} -> {style_name}")
+                            except ValueError:
+                                print(f"  ✓ {py_file.name} -> {style_name}")
+                        elif loaded_count == 6:
+                            print(f"  ... 还有更多文件加载成功")
+            except Exception as e:
+                pass
+        
+        if loaded_count > 5:
+            print(f"  ✓ 共加载 {loaded_count} 个风格")
+        
+        return all_styles
+    
+    @staticmethod
+    def expand_style(style_name: str, style_data: Dict, limit: int = None) -> List[Dict]:
+        """将 STYLE 字典展开为 schemes 列表，支持限制组合数"""
+        schemes = []
+        subjects = style_data.get('subjects', [''])
+        styles = style_data.get('styles', [''])
+        moods = style_data.get('moods', [''])
+        
+        if not subjects:
+            subjects = ['']
+        
+        if len(subjects) == 1 and "placeholder" in subjects[0].lower():
+            return []
+        
+        combo_id = 0
+        for subject in subjects:
+            if not subject or "placeholder" in subject.lower():
+                continue
+            
+            if styles and moods:
+                for style_item in styles:
+                    for mood in moods:
+                        combo_id += 1
+                        # 如果设置了限制且达到上限，停止
+                        if limit and combo_id > limit:
+                            break
+                        
+                        prompt_parts = [subject, style_item, mood]
+                        full_prompt = ', '.join(prompt_parts)
+                        
+                        schemes.append({
+                            'id': combo_id,
+                            'name': f"{style_name}_{combo_id}",
+                            'prompts': [full_prompt],
+                            'negative_prompt': '',
+                            'params': {
+                                'width': 512,
+                                'height': 768,
+                                'steps': 30,
+                                'cfg_scale': 7.5,
+                                'seed': -1,
+                                'batch_size': 1,
+                                'model': 'anytimeRealistic_v10.safetensors'
+                            },
+                            'source': 'python',
+                            'style_name': style_name,
+                            'folder': style_data.get('folder', style_name),
+                            'subject': subject,
+                            'style': style_item,
+                            'mood': mood
+                        })
+                    if limit and combo_id >= limit:
+                        break
+            else:
+                combo_id += 1
+                if limit and combo_id > limit:
+                    break
+                
+                prompt_parts = [subject]
+                if styles:
+                    prompt_parts.append(', '.join(styles))
+                if moods:
+                    prompt_parts.append(', '.join(moods))
+                full_prompt = ', '.join(prompt_parts)
+                
+                schemes.append({
+                    'id': combo_id,
+                    'name': f"{style_name}_{combo_id}",
+                    'prompts': [full_prompt],
+                    'negative_prompt': '',
+                    'params': {
+                        'width': 512,
+                        'height': 768,
+                        'steps': 30,
+                        'cfg_scale': 7.5,
+                        'seed': -1,
+                        'batch_size': 1,
+                        'model': 'anytimeRealistic_v10.safetensors'
+                    },
+                    'source': 'python',
+                    'style_name': style_name,
+                    'folder': style_data.get('folder', style_name)
+                })
+        
+        return schemes
 
-    def generate_one(self, scheme):
+
+class PromptCombinator:
+    """Prompt 组合器"""
+    
+    @staticmethod
+    def combine_prompts(schemes: List[Dict]) -> List[Dict]:
+        """扩展每个 scheme 的 prompts 字段"""
+        expanded = []
+        for scheme in schemes:
+            prompts = scheme.get('prompts', [''])
+            if isinstance(prompts, str):
+                prompts = [prompts]
+            
+            for i, prompt in enumerate(prompts):
+                if not prompt or "placeholder" in prompt.lower():
+                    continue
+                new_scheme = scheme.copy()
+                new_scheme['id'] = f"{scheme['id']}_{i+1}" if len(prompts) > 1 else scheme['id']
+                new_scheme['name'] = f"{scheme['name']}_{i+1}" if len(prompts) > 1 else scheme['name']
+                new_scheme['prompt'] = prompt
+                expanded.append(new_scheme)
+        
+        return expanded
+
+
+class SDImageGenerator:
+    def __init__(self, config_path: str = None, source: str = None, auto_load: bool = True,
+                 style_filter: str = None, folder_filter: str = None, limit: int = None):
+        self.base_dir = Path(__file__).parent.parent
+        self.schemes = []
+        self.output_dir = None
+        self.loader_source = None
+        self.source_path = None
+        self.style_filter = style_filter
+        self.folder_filter = folder_filter
+        self.limit = limit
+        
+        if config_path:
+            self._load_from_json(config_path)
+            self.loader_source = 'json'
+        elif source:
+            self._load_from_python(source)
+            self.loader_source = 'python'
+        elif auto_load:
+            self._auto_load()
+        else:
+            self.loader_source = None
+            return
+        
+        if self.schemes:
+            if self.schemes[0].get('source') == 'python':
+                self.output_dir = Path("./output/python_generated")
+            else:
+                self.output_dir = Path("./output/json_generated")
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+    
+    def _auto_load(self):
+        """自动加载 prompts 目录"""
+        prompts_dir = PromptLoader.find_prompts_dir()
+        if prompts_dir:
+            print(f"🔍 自动发现 prompts 目录: {prompts_dir}")
+            self.source_path = prompts_dir
+            self._load_python_directory(prompts_dir)
+            self.loader_source = 'python'
+        else:
+            self.loader_source = None
+    
+    def _load_from_json(self, config_path):
+        """从 JSON 加载"""
+        config_path = Path(config_path)
+        if not config_path.exists():
+            config_path = project_root / config_path
+            if not config_path.exists():
+                config_path = Path(__file__).parent / config_path
+                if not config_path.exists():
+                    print(f"❌ 配置文件不存在: {config_path}")
+                    sys.exit(1)
+        
+        self.schemes = PromptLoader.load_json(config_path)
+        print(f"✅ 从 JSON 加载了 {len(self.schemes)} 个方案")
+    
+    def _load_from_python(self, source):
+        """从 Python 文件/目录加载"""
+        resolved_path = PromptLoader.resolve_source(source)
+        
+        if resolved_path is None:
+            prompts_dir = PromptLoader.find_prompts_dir(source)
+            if prompts_dir:
+                print(f"💡 自动发现 prompts 目录: {prompts_dir}")
+                self.source_path = prompts_dir
+                self._load_python_directory(prompts_dir)
+                return
+            else:
+                print(f"❌ 无法解析源路径: {source}")
+                sys.exit(1)
+            return
+        
+        self.source_path = resolved_path
+        
+        if resolved_path.is_file() and resolved_path.suffix == '.py':
+            styles = PromptLoader.load_python_file(resolved_path)
+            if styles:
+                print(f"✅ 从 Python 文件加载了 {len(styles)} 个风格")
+            else:
+                print(f"⚠️ 文件中未找到 STYLE 字典: {resolved_path}")
+                sys.exit(1)
+        elif resolved_path.is_dir():
+            self._load_python_directory(resolved_path)
+            return
+        else:
+            print(f"❌ 无效的源: {source} -> {resolved_path}")
+            sys.exit(1)
+        
+        all_schemes = []
+        for style_name, style_data in styles.items():
+            schemes = PromptLoader.expand_style(style_name, style_data, self.limit)
+            all_schemes.extend(schemes)
+        
+        self.schemes = PromptCombinator.combine_prompts(all_schemes)
+        print(f"✅ 展开为 {len(self.schemes)} 个生成方案")
+    
+    def _load_python_directory(self, dir_path: Path):
+        """加载 Python 目录（递归搜索所有子目录）"""
+        print(f"📂 扫描目录: {dir_path}")
+        
+        # 显示过滤条件
+        if self.style_filter:
+            print(f"   🎯 风格过滤: {self.style_filter}")
+        if self.folder_filter:
+            print(f"   📁 文件夹过滤: {self.folder_filter}")
+        if self.limit:
+            print(f"   📊 每个风格限制: {self.limit} 个组合")
+        
+        styles = PromptLoader.load_python_directory(
+            dir_path, recursive=True,
+            style_filter=self.style_filter,
+            folder_filter=self.folder_filter
+        )
+        
+        if not styles:
+            print(f"❌ 在 {dir_path} 中未加载到任何风格")
+            if self.style_filter or self.folder_filter:
+                print("   请检查过滤条件是否正确")
+            sys.exit(1)
+        
+        # 显示加载的风格列表
+        print(f"\n📋 加载的风格列表 ({len(styles)} 个):")
+        for idx, (name, data) in enumerate(sorted(styles.items()), 1):
+            folder = data.get('folder', '未知文件夹')
+            subjects_count = len(data.get('subjects', []))
+            styles_count = len(data.get('styles', []))
+            moods_count = len(data.get('moods', []))
+            total = subjects_count * (styles_count if styles_count else 1) * (moods_count if moods_count else 1)
+            actual = min(total, self.limit) if self.limit else total
+            print(f"  {idx:3}. {name}")
+            print(f"      文件夹: {folder} | 主题: {subjects_count} | 风格: {styles_count} | 情绪: {moods_count} | 组合: {actual}/{total}")
+        
+        # 保存到文件
+        self._save_styles_list(styles)
+        
+        all_schemes = []
+        for style_name, style_data in styles.items():
+            schemes = PromptLoader.expand_style(style_name, style_data, self.limit)
+            all_schemes.extend(schemes)
+        
+        self.schemes = PromptCombinator.combine_prompts(all_schemes)
+        print(f"\n✅ 从目录加载了 {len(styles)} 个风格，展开为 {len(self.schemes)} 个生成方案")
+    
+    def _save_styles_list(self, styles: Dict):
+        """保存风格列表到文件"""
+        output_file = Path("./output/styles_list.txt")
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write("="*80 + "\n")
+            f.write("  加载的 Prompt 风格列表\n")
+            f.write("="*80 + "\n\n")
+            
+            if self.style_filter:
+                f.write(f"风格过滤: {self.style_filter}\n")
+            if self.folder_filter:
+                f.write(f"文件夹过滤: {self.folder_filter}\n")
+            if self.limit:
+                f.write(f"每个风格限制: {self.limit} 个组合\n")
+            
+            f.write(f"总计: {len(styles)} 个风格\n")
+            f.write(f"生成时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            f.write("-"*80 + "\n\n")
+            
+            for idx, (name, data) in enumerate(sorted(styles.items()), 1):
+                folder = data.get('folder', '未知文件夹')
+                subjects = data.get('subjects', [])
+                styles_list = data.get('styles', [])
+                moods = data.get('moods', [])
+                
+                subjects_count = len(subjects)
+                styles_count = len(styles_list)
+                moods_count = len(moods)
+                total = subjects_count * (styles_count if styles_count else 1) * (moods_count if moods_count else 1)
+                actual = min(total, self.limit) if self.limit else total
+                
+                f.write(f"[{idx}] {name}\n")
+                f.write(f"    文件夹: {folder}\n")
+                f.write(f"    主题数: {subjects_count}\n")
+                f.write(f"    风格数: {styles_count}\n")
+                f.write(f"    情绪数: {moods_count}\n")
+                f.write(f"    组合数: {actual}/{total}\n")
+                
+                if subjects:
+                    f.write(f"    主题示例: {subjects[0][:60]}...\n" if len(subjects[0]) > 60 else f"    主题示例: {subjects[0]}\n")
+                if styles_list:
+                    f.write(f"    风格示例: {styles_list[0]}\n")
+                if moods:
+                    f.write(f"    情绪示例: {moods[0]}\n")
+                f.write("\n")
+            
+            f.write("="*80 + "\n")
+            f.write(f"总计: {len(styles)} 个风格\n")
+        
+        print(f"\n💾 风格列表已保存到: {output_file}")
+    
+    def generate_one(self, scheme, index: int = None):
         """生成单张图片"""
-        print(f"\n{'='*60}")
-        print(f"   [{scheme['id']}/{len(self.schemes)}] {scheme['name']}")
-        print('='*60)
-
-        # 合并默认参数
-        params = self.default_params.copy()
-        params.update(scheme)
-
-        # 处理 seed
+        if not hasattr(self, '_call_count'):
+            self._call_count = 0
+        self._call_count += 1
+        
+        if index is not None:
+            print(f"\n{'='*60}")
+            print(f"   🔥 第 {self._call_count} 次调用 generate_one")
+            print(f"   [{index}/{len(self.schemes)}] {scheme['name']}")
+            print('='*60)
+        else:
+            print(f"\n{'='*60}")
+            print(f"   🔥 第 {self._call_count} 次调用 generate_one")
+            print(f"   {scheme['name']}")
+            print('='*60)
+        
+        params = scheme.get('params', {})
+        prompt = scheme.get('prompt', '')
+        negative_prompt = scheme.get('negative_prompt', '')
+        
+        if not prompt:
+            print("❌ 无 prompt 内容")
+            return False
+        
         seed = params.get('seed', -1)
         if isinstance(seed, str):
             try:
                 seed = int(seed)
             except:
                 seed = -1
-        params['seed'] = seed
-
+        
         try:
             result = execute_skill(
                 "sd_image_generator",
-                prompt=params["prompt"],
-                negative_prompt=params.get("negative_prompt", ""),
-                model_name=params.get("model", self.default_params.get("model", "anytimeRealistic_v10.safetensors")),
-                width=params.get("width", 512),
-                height=params.get("height", 768),
-                steps=params.get("steps", 30),
-                cfg_scale=params.get("cfg_scale", 7.5),
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                model_name=params.get('model', 'anytimeRealistic_v10.safetensors'),
+                width=params.get('width', 512),
+                height=params.get('height', 768),
+                steps=params.get('steps', 30),
+                cfg_scale=params.get('cfg_scale', 7.5),
                 seed=seed,
-                batch_size=params.get("batch_size", 1)
+                batch_size=params.get('batch_size', 1)
             )
             return result is not None
         except Exception as e:
             print(f"❌ 执行失败: {e}")
             return False
-
+    
     def list_schemes(self):
         """列出所有方案"""
-        print("\n" + "="*70)
+        if not self.schemes:
+            print("❌ 没有加载任何方案")
+            print("\n💡 提示: 请确保 prompts 目录存在且包含 .py 文件")
+            return
+        
+        print("\n" + "="*90)
         print("   📸 SD 图片生成方案列表")
-        print("="*70)
+        print("="*90)
         print()
-        print(f"{'ID':<4} {'名称':<25} {'尺寸':<12} {'步数':<6} {'CFG':<6}")
-        print("-"*70)
-        for s in self.schemes:
-            w = s.get('width', self.default_params.get('width', 512))
-            h = s.get('height', self.default_params.get('height', 768))
-            steps = s.get('steps', self.default_params.get('steps', 30))
-            cfg = s.get('cfg_scale', self.default_params.get('cfg_scale', 7.5))
-            print(f"{s['id']:<4} {s['name']:<25} {w}x{h:<6} {steps:<6} {cfg:<6}")
+        print(f"{'ID':<8} {'名称':<35} {'风格':<20} {'尺寸':<12}")
+        print("-"*90)
+        
+        for idx, s in enumerate(self.schemes[:50], 1):
+            w = s.get('params', {}).get('width', 512)
+            h = s.get('params', {}).get('height', 768)
+            style_name = s.get('style_name', 'unknown')
+            print(f"{idx:<8} {s['name'][:34]:<35} {style_name[:19]:<20} {w}x{h}")
+        
+        if len(self.schemes) > 50:
+            print(f"... 还有 {len(self.schemes) - 50} 个方案未显示")
         print()
         print(f"共 {len(self.schemes)} 个方案")
-        print(f"默认模型: {self.default_params.get('model', '未指定')}")
-
+        print(f"源目录: {self.source_path}")
+        print(f"输出目录: {self.output_dir}")
+    
     def generate_by_id(self, ids):
-        """根据 ID 生成"""
-        for s in self.schemes:
-            if s['id'] in ids:
-                self.generate_one(s)
-
+        """根据 ID 生成（ID 从 1 开始）"""
+        if not self.schemes:
+            print("❌ 没有加载任何方案")
+            return
+        
+        if isinstance(ids, int):
+            ids = [ids]
+        elif isinstance(ids, str):
+            ids = [int(x.strip()) for x in ids.split(',')]
+        elif not isinstance(ids, list):
+            ids = list(ids)
+        
+        ids = [int(i) for i in ids]
+        
+        print(f"🔍 查找 ID: {ids}")
+        print(f"📊 总方案数: {len(self.schemes)}")
+        
+        found = []
+        for idx, s in enumerate(self.schemes, 1):
+            if idx in ids:
+                found.append((idx, s))
+                print(f"  ✓ 找到 ID {idx}: {s['name']}")
+        
+        if not found:
+            print(f"❌ 未找到 ID: {ids}")
+            print(f"   可用 ID 范围: 1-{len(self.schemes)}")
+            return
+        
+        print(f"\n🎯 将生成 {len(found)} 个方案")
+        
+        for idx, s in found:
+            self.generate_one(s, idx)
+            time.sleep(0.5)
+    
     def generate_all(self):
         """生成所有"""
+        if not self.schemes:
+            print("❌ 没有加载任何方案")
+            return
+        
         total = len(self.schemes)
         success = 0
-        for s in self.schemes:
-            if self.generate_one(s):
+        for idx, s in enumerate(self.schemes, 1):
+            print(f"\n进度: {idx}/{total}")
+            if self.generate_one(s, idx):
                 success += 1
             time.sleep(0.5)
         print(f"\n✅ 完成！成功 {success}/{total} 张")
+    
+    def show_help(self):
+        """显示帮助信息"""
+        prompts_dir = PromptLoader.find_prompts_dir()
+        if prompts_dir:
+            prompts_path = str(prompts_dir) + "/"
+        else:
+            prompts_path = "configs/prompts/"
+        
+        print(f"""
+╔══════════════════════════════════════════════════════════════════╗
+║                    SD 图片批量生成器                             ║
+║                    支持 JSON + Python 配置                      ║
+╚══════════════════════════════════════════════════════════════════╝
 
+📖 用法:
+
+  1. 自动加载所有风格
+     python generate_images.py --list          # 列出所有方案
+     python generate_images.py --all           # 生成所有方案
+     python generate_images.py --id 1          # 生成第 1 个方案
+
+  2. 按风格名称筛选
+     python generate_images.py --style bird_sketch --list
+     python generate_images.py --style bird_sketch --id 1
+
+  3. 按文件夹名称筛选
+     python generate_images.py --folder 极简飞鸟线稿 --list
+     python generate_images.py --folder 极简飞鸟线稿 --all
+
+  4. 限制每个风格的组合数
+     python generate_images.py --limit 10 --list
+     python generate_images.py --limit 5 --style bird_sketch --all
+
+  5. 组合使用
+     python generate_images.py --style bird_sketch --limit 5 --all
+
+  6. 使用 JSON 配置文件
+     python generate_images.py --config configs/girls_config.json
+
+📂 自动发现路径:
+  - scripts/configs/prompts
+  - configs/prompts
+  - tools/prompts_new
+  - prompts_new
+
+⏭️ 自动排除文件:
+  - dynamic_prompt.py (触发器文件)
+  - __init__.py
+
+🔧 参数:
+  --help          显示此帮助信息
+  --list          列出所有已加载的方案
+  --all           生成所有方案
+  --id N          生成指定 ID 的方案
+  --ids N,N       生成多个方案
+  --style NAME    只加载指定风格
+  --folder NAME   只加载指定文件夹
+  --limit N       每个风格最多生成 N 个组合
+  --config PATH   使用 JSON 配置文件
+  --source PATH   指定 Python prompt 目录
+""")
+    
     def run(self, args):
+        if args.help or (not args.config and not args.source and not args.list and 
+                         args.id is None and args.ids is None and not args.all):
+            self.show_help()
+            return
+        
         if args.list:
             self.list_schemes()
             return
-
-        if args.id:
+        
+        if args.id is not None:
             self.generate_by_id([args.id])
             return
-
+        
         if args.ids:
             ids = [int(x.strip()) for x in args.ids.split(',')]
             self.generate_by_id(ids)
             return
-
-        self.generate_all()
+        
+        if args.all:
+            self.generate_all()
+            return
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="SD 图片批量生成器 - 配置文件版",
-        epilog="示例：\n"
-               "  python generate_images.py                    # 生成所有方案\n"
-               "  python generate_images.py --list             # 列出所有方案\n"
-               "  python generate_images.py --id 1             # 生成第 1 组\n"
-               "  python generate_images.py --ids 1,3,5        # 生成指定组\n"
-               "  python generate_images.py --config custom.json # 使用自定义配置"
+        description="SD 图片批量生成器 - 支持 JSON + Python 配置",
+        add_help=False,
+        epilog="示例：python generate_images.py --style bird_sketch --limit 10 --list"
     )
+    parser.add_argument("--config", type=str, help="使用 JSON 配置文件")
+    parser.add_argument("--source", type=str, help="加载 Python prompt 文件/目录/风格名称")
     parser.add_argument("--list", action="store_true", help="列出所有方案")
     parser.add_argument("--id", type=int, help="生成指定 ID 的方案")
     parser.add_argument("--ids", type=str, help="生成多个方案，用逗号分隔，如 1,3,5")
-    parser.add_argument("--config", type=str, help="使用自定义配置文件")
-
+    parser.add_argument("--all", action="store_true", help="生成所有方案")
+    parser.add_argument("--help", action="store_true", help="显示帮助信息")
+    
+    # ========== 新增参数 ==========
+    parser.add_argument("--style", type=str, help="只加载指定风格（如 bird_sketch）")
+    parser.add_argument("--folder", type=str, help="只加载指定文件夹（如 极简飞鸟线稿）")
+    parser.add_argument("--limit", type=int, help="每个风格最多生成 N 个组合")
+    
     args = parser.parse_args()
-    generator = SDImageGenerator(args.config)
+    
+    if len(sys.argv) == 1:
+        args.help = True
+    
+    generator = SDImageGenerator(
+        args.config, args.source, auto_load=True,
+        style_filter=args.style,
+        folder_filter=args.folder,
+        limit=args.limit
+    )
     generator.run(args)
 
 
