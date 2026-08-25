@@ -8,17 +8,36 @@ import torch
 import numpy as np
 from PIL import Image, ImageDraw
 import cv2
-from typing import Optional, Dict, Any
+from typing import Optional
+from pathlib import Path
 
 
 class ClothesRemover:
     """衣服移除器"""
     
-    def __init__(self, device: str = "cpu"):
+    def __init__(self, device: str = "cpu", model_path: str = None):
         self.device = device
         self._yolo_model = None
         self._sd_pipe = None
+        
+        # 获取项目根目录（向上5级到 SD_OpenVINO）
+        # MarkFlow/markflow/skills/remove_clothes/skill.py
+        # 向上5级: SD_OpenVINO/
+        self.project_root = Path(__file__).parent.parent.parent.parent.parent
+        
+        # 默认模型路径: SD_OpenVINO/models/sd-v1-5/sd-v1-5-inpainting-tiny.safetensors
+        self.default_model_path = self.project_root / "models" / "sd-v1-5" / "sd-v1-5-inpainting-tiny.safetensors"
+        
+        # 如果指定了模型路径，使用指定的
+        if model_path:
+            self.model_path = Path(model_path)
+        else:
+            self.model_path = self.default_model_path
+        
         print("👕 衣服移除器已初始化")
+        print(f"   📂 项目根目录: {self.project_root}")
+        print(f"   📦 模型路径: {self.model_path}")
+        print(f"   ✅ 模型存在: {self.model_path.exists()}")
     
     def _get_yolo_model(self):
         if self._yolo_model is None:
@@ -26,7 +45,11 @@ class ClothesRemover:
                 from ultralytics import YOLO
                 self._yolo_model = YOLO("yolov8n-seg.pt")
                 print("   ✅ YOLO 加载成功")
-            except:
+            except ImportError:
+                print("   ⚠️ ultralytics 未安装，将使用手动遮罩")
+                self._yolo_model = False
+            except Exception as e:
+                print(f"   ⚠️ YOLO 加载失败: {e}")
                 self._yolo_model = False
         return self._yolo_model
     
@@ -36,16 +59,21 @@ class ClothesRemover:
             try:
                 from diffusers import StableDiffusionInpaintPipeline
                 
-                model_path = r"E:\SD_OpenVINO\models\sd-v1-5\sd-v1-5-inpainting-tiny.safetensors"
+                # 检查模型是否存在
+                if not self.model_path.exists():
+                    print(f"   ❌ 模型不存在: {self.model_path}")
+                    print(f"\n   📥 请下载模型并放到:")
+                    print(f"      {self.model_path}")
+                    print(f"\n   🔗 下载地址:")
+                    print(f"      https://huggingface.co/runwayml/stable-diffusion-inpainting")
+                    print(f"\n   💡 或使用 HuggingFace 在线模型:")
+                    print(f"      python scripts/generate_images.py --remove-clothes --input image.jpg --model runwayml/stable-diffusion-inpainting")
+                    self._sd_pipe = False
+                    return self._sd_pipe
                 
-                if not os.path.exists(model_path):
-                    print(f"   ⚠️ 模型不存在: {model_path}")
-                    print("   🔄 尝试使用 runwayml/stable-diffusion-inpainting")
-                    model_path = "runwayml/stable-diffusion-inpainting"
-                
-                print(f"   📦 加载模型: {os.path.basename(model_path) if os.path.exists(model_path) else model_path}")
+                print(f"   📦 加载模型: {self.model_path.name}")
                 self._sd_pipe = StableDiffusionInpaintPipeline.from_single_file(
-                    model_path,
+                    str(self.model_path),
                     torch_dtype=torch.float32,
                     safety_checker=None,
                     requires_safety_checker=False,
@@ -54,12 +82,13 @@ class ClothesRemover:
                 if self.device == "cpu":
                     self._sd_pipe.enable_attention_slicing()
                 print("   ✅ SD Inpaint 模型加载成功")
+                
             except ImportError:
-                print("   ⚠️ 未安装 diffusers")
+                print("   ❌ 未安装 diffusers")
                 print("   💡 安装: pip install diffusers transformers accelerate")
                 self._sd_pipe = False
             except Exception as e:
-                print(f"   ⚠️ SD 模型加载失败: {e}")
+                print(f"   ❌ SD 模型加载失败: {e}")
                 self._sd_pipe = False
         return self._sd_pipe
     
@@ -108,8 +137,8 @@ class ClothesRemover:
         self,
         image_path: str,
         output_path: Optional[str] = None,
-        prompt: str = "nude, naked body, beautiful skin, realistic body, masterpiece",
-        negative_prompt: str = "clothes, fabric, ugly, deformed, bad anatomy",
+        prompt: str = "nude, naked body, beautiful skin, realistic body, masterpiece, best quality",
+        negative_prompt: str = "clothes, fabric, ugly, deformed, bad anatomy, cropped",
         strength: float = 0.85,
         steps: int = 30,
         seed: Optional[int] = None,
@@ -118,7 +147,7 @@ class ClothesRemover:
         """去除衣服 - 保持原始尺寸（不缩放）"""
         sd = self._load_sd_model()
         if sd is None or sd is False:
-            raise RuntimeError("SD 模型不可用")
+            raise RuntimeError("SD 模型不可用，请检查模型路径")
         
         # 加载图片
         image = Image.open(image_path).convert("RGB")
@@ -170,6 +199,7 @@ def execute(**kwargs) -> bool:
     参数:
         input_path: 输入图片路径
         output_path: 输出图片路径（可选）
+        model_path: SD Inpaint 模型路径（可选）
         prompt: 生成提示词
         negative_prompt: 负面提示词
         strength: 重绘强度 (0.0-1.0)
@@ -180,8 +210,9 @@ def execute(**kwargs) -> bool:
     """
     input_path = kwargs.get('input_path')
     output_path = kwargs.get('output_path')
-    prompt = kwargs.get('prompt', "nude, naked body, beautiful skin, realistic body, masterpiece")
-    negative_prompt = kwargs.get('negative_prompt', "clothes, fabric, ugly, deformed, bad anatomy")
+    model_path = kwargs.get('model_path')
+    prompt = kwargs.get('prompt', "nude, naked body, beautiful skin, realistic body, masterpiece, best quality")
+    negative_prompt = kwargs.get('negative_prompt', "clothes, fabric, ugly, deformed, bad anatomy, cropped")
     strength = kwargs.get('strength', 0.85)
     steps = kwargs.get('steps', 30)
     seed = kwargs.get('seed', None)
@@ -193,7 +224,7 @@ def execute(**kwargs) -> bool:
         return False
     
     try:
-        remover = ClothesRemover(device=device)
+        remover = ClothesRemover(device=device, model_path=model_path)
         result = remover.remove_clothes(
             input_path, output_path,
             prompt=prompt,
@@ -207,4 +238,4 @@ def execute(**kwargs) -> bool:
         return True
     except Exception as e:
         print(f"❌ 执行失败: {e}")
-        return False    
+        return False

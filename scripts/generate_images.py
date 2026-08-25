@@ -5,6 +5,7 @@ SD 图片批量生成器 - 支持 JSON + Python 配置
 """
 
 import sys
+import os
 import json
 import argparse
 import time
