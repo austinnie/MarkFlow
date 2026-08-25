@@ -188,12 +188,9 @@ class PromptLoader:
             try:
                 styles = PromptLoader.load_python_file(py_file)
                 if styles:
-                    # 应用过滤器
                     for style_name, style_data in styles.items():
-                        # 风格名过滤
                         if style_filter and style_filter not in style_name:
                             continue
-                        # 文件夹名过滤
                         if folder_filter and folder_filter not in style_data.get('folder', ''):
                             continue
                         all_styles[style_name] = style_data
@@ -237,7 +234,6 @@ class PromptLoader:
                 for style_item in styles:
                     for mood in moods:
                         combo_id += 1
-                        # 如果设置了限制且达到上限，停止
                         if limit and combo_id > limit:
                             break
                         
@@ -336,6 +332,7 @@ class SDImageGenerator:
         self.style_filter = style_filter
         self.folder_filter = folder_filter
         self.limit = limit
+        self._call_count = 0
         
         if config_path:
             self._load_from_json(config_path)
@@ -425,7 +422,6 @@ class SDImageGenerator:
         """加载 Python 目录（递归搜索所有子目录）"""
         print(f"📂 扫描目录: {dir_path}")
         
-        # 显示过滤条件
         if self.style_filter:
             print(f"   🎯 风格过滤: {self.style_filter}")
         if self.folder_filter:
@@ -445,7 +441,6 @@ class SDImageGenerator:
                 print("   请检查过滤条件是否正确")
             sys.exit(1)
         
-        # 显示加载的风格列表
         print(f"\n📋 加载的风格列表 ({len(styles)} 个):")
         for idx, (name, data) in enumerate(sorted(styles.items()), 1):
             folder = data.get('folder', '未知文件夹')
@@ -457,7 +452,6 @@ class SDImageGenerator:
             print(f"  {idx:3}. {name}")
             print(f"      文件夹: {folder} | 主题: {subjects_count} | 风格: {styles_count} | 情绪: {moods_count} | 组合: {actual}/{total}")
         
-        # 保存到文件
         self._save_styles_list(styles)
         
         all_schemes = []
@@ -523,8 +517,6 @@ class SDImageGenerator:
     
     def generate_one(self, scheme, index: int = None):
         """生成单张图片"""
-        if not hasattr(self, '_call_count'):
-            self._call_count = 0
         self._call_count += 1
         
         if index is not None:
@@ -648,6 +640,105 @@ class SDImageGenerator:
             time.sleep(0.5)
         print(f"\n✅ 完成！成功 {success}/{total} 张")
     
+    # ========== 新增：衣服移除模式 ==========
+    def remove_clothes_mode(self, args):
+        """执行衣服移除"""
+        print("\n" + "="*60)
+        print("   👕 衣服移除模式")
+        print("="*60)
+        
+        input_path = args.input
+        output_path = args.output
+        batch = args.batch
+        
+        if not input_path:
+            print("❌ 请指定输入路径: --input <图片路径或目录>")
+            return
+        
+        if not os.path.exists(input_path):
+            print(f"❌ 路径不存在: {input_path}")
+            return
+        
+        if batch:
+            # 批量模式
+            if not os.path.isdir(input_path):
+                print(f"❌ 批量模式需要目录: {input_path}")
+                return
+            
+            print(f"📁 批量处理目录: {input_path}")
+            if output_path:
+                print(f"📂 输出目录: {output_path}")
+            else:
+                output_path = os.path.join(input_path, "nude_output")
+                print(f"📂 输出目录: {output_path} (默认)")
+            
+            # 收集所有图片
+            extensions = ('.png', '.jpg', '.jpeg', '.webp')
+            files = [os.path.join(input_path, f) for f in os.listdir(input_path) 
+                     if f.lower().endswith(extensions)]
+            files = sorted(files)
+            
+            if not files:
+                print(f"❌ 未找到图片: {input_path}")
+                return
+            
+            print(f"\n📊 找到 {len(files)} 个图片")
+            print("="*60)
+            
+            os.makedirs(output_path, exist_ok=True)
+            
+            success_count = 0
+            for i, file_path in enumerate(files, 1):
+                filename = os.path.basename(file_path)
+                out_file = os.path.join(output_path, filename)
+                print(f"\n[{i}/{len(files)}] {filename}")
+                
+                try:
+                    result = execute_skill(
+                        "remove_clothes",
+                        input_path=file_path,
+                        output_path=out_file,
+                        prompt=args.prompt,
+                        negative_prompt=args.negative,
+                        strength=args.strength,
+                        steps=args.steps,
+                        seed=args.seed,
+                        device=args.device,
+                        save_mask=args.save_mask
+                    )
+                    if result:
+                        success_count += 1
+                except Exception as e:
+                    print(f"   ❌ 失败: {e}")
+            
+            print(f"\n✅ 完成: {success_count}/{len(files)} 张")
+            
+        else:
+            # 单张模式
+            if not os.path.isfile(input_path):
+                print(f"❌ 文件不存在: {input_path}")
+                return
+            
+            print(f"📷 处理单张图片: {input_path}")
+            
+            try:
+                result = execute_skill(
+                    "remove_clothes",
+                    input_path=input_path,
+                    output_path=output_path,
+                    prompt=args.prompt,
+                    negative_prompt=args.negative,
+                    strength=args.strength,
+                    steps=args.steps,
+                    seed=args.seed,
+                    device=args.device,
+                    save_mask=args.save_mask
+                )
+                if result:
+                    print("\n✅ 完成！")
+            except Exception as e:
+                print(f"❌ 执行失败: {e}")
+    
     def show_help(self):
         """显示帮助信息"""
         prompts_dir = PromptLoader.find_prompts_dir()
@@ -662,7 +753,7 @@ class SDImageGenerator:
 ║                    支持 JSON + Python 配置                      ║
 ╚══════════════════════════════════════════════════════════════════╝
 
-📖 用法:
+📖 图片生成用法:
 
   1. 自动加载所有风格
      python generate_images.py --list          # 列出所有方案
@@ -687,6 +778,20 @@ class SDImageGenerator:
   6. 使用 JSON 配置文件
      python generate_images.py --config configs/girls_config.json
 
+👕 衣服移除用法:
+
+  7. 单张图片移除衣服
+     python generate_images.py --remove-clothes --input image.jpg
+     python generate_images.py --remove-clothes --input image.jpg -o output.jpg
+
+  8. 批量处理
+     python generate_images.py --remove-clothes --input ./images/ --batch
+     python generate_images.py --remove-clothes --input ./images/ --batch -o ./output/
+
+  9. 衣服移除高级参数
+     python generate_images.py --remove-clothes --input image.jpg \\
+         --prompt "nude, beautiful skin" --strength 0.85 --steps 30 --device cpu
+
 📂 自动发现路径:
   - scripts/configs/prompts
   - configs/prompts
@@ -698,19 +803,37 @@ class SDImageGenerator:
   - __init__.py
 
 🔧 参数:
-  --help          显示此帮助信息
-  --list          列出所有已加载的方案
-  --all           生成所有方案
-  --id N          生成指定 ID 的方案
-  --ids N,N       生成多个方案
-  --style NAME    只加载指定风格
-  --folder NAME   只加载指定文件夹
-  --limit N       每个风格最多生成 N 个组合
-  --config PATH   使用 JSON 配置文件
-  --source PATH   指定 Python prompt 目录
+  --help              显示此帮助信息
+  --list              列出所有已加载的方案
+  --all               生成所有方案
+  --id N              生成指定 ID 的方案
+  --ids N,N           生成多个方案
+  --style NAME        只加载指定风格
+  --folder NAME       只加载指定文件夹
+  --limit N           每个风格最多生成 N 个组合
+  --config PATH       使用 JSON 配置文件
+  --source PATH       指定 Python prompt 目录
+
+👕 衣服移除参数:
+  --remove-clothes    进入衣服移除模式
+  --input PATH        输入图片路径或目录
+  -o, --output PATH   输出路径（单张）或输出目录（批量）
+  --batch             批量模式
+  --prompt TEXT       生成提示词 (默认: nude, naked body...)
+  --negative TEXT     负面提示词 (默认: clothes, fabric, ugly...)
+  --strength FLOAT    重绘强度 (0.0-1.0, 默认: 0.85)
+  --steps N           迭代步数 (默认: 30)
+  --seed N            随机种子
+  --device DEVICE     设备 (cpu/cuda, 默认: cpu)
+  --save-mask         保存遮罩
 """)
     
     def run(self, args):
+        # ========== 衣服移除模式 ==========
+        if args.remove_clothes:
+            self.remove_clothes_mode(args)
+            return
+        
         if args.help or (not args.config and not args.source and not args.list and 
                          args.id is None and args.ids is None and not args.all):
             self.show_help()
@@ -736,10 +859,12 @@ class SDImageGenerator:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="SD 图片批量生成器 - 支持 JSON + Python 配置",
+        description="SD 图片批量生成器 - 支持 JSON + Python 配置 + 衣服移除",
         add_help=False,
         epilog="示例：python generate_images.py --style bird_sketch --limit 10 --list"
     )
+    
+    # ========== 图片生成参数 ==========
     parser.add_argument("--config", type=str, help="使用 JSON 配置文件")
     parser.add_argument("--source", type=str, help="加载 Python prompt 文件/目录/风格名称")
     parser.add_argument("--list", action="store_true", help="列出所有方案")
@@ -747,11 +872,26 @@ def main():
     parser.add_argument("--ids", type=str, help="生成多个方案，用逗号分隔，如 1,3,5")
     parser.add_argument("--all", action="store_true", help="生成所有方案")
     parser.add_argument("--help", action="store_true", help="显示帮助信息")
-    
-    # ========== 新增参数 ==========
     parser.add_argument("--style", type=str, help="只加载指定风格（如 bird_sketch）")
     parser.add_argument("--folder", type=str, help="只加载指定文件夹（如 极简飞鸟线稿）")
     parser.add_argument("--limit", type=int, help="每个风格最多生成 N 个组合")
+    
+    # ========== 衣服移除参数 ==========
+    parser.add_argument("--remove-clothes", action="store_true", help="进入衣服移除模式")
+    parser.add_argument("--input", type=str, help="输入图片路径或目录")
+    parser.add_argument("-o", "--output", type=str, help="输出路径（单张）或输出目录（批量）")
+    parser.add_argument("--batch", action="store_true", help="批量模式")
+    parser.add_argument("--prompt", type=str, 
+                        default="nude, naked body, beautiful skin, realistic body, masterpiece, best quality",
+                        help="生成提示词")
+    parser.add_argument("--negative", type=str,
+                        default="clothes, fabric, ugly, deformed, bad anatomy, cropped, low quality",
+                        help="负面提示词")
+    parser.add_argument("--strength", type=float, default=0.85, help="重绘强度 (0.0-1.0)")
+    parser.add_argument("--steps", type=int, default=30, help="迭代步数")
+    parser.add_argument("--seed", type=int, default=None, help="随机种子")
+    parser.add_argument("--device", type=str, default="cpu", choices=["cpu", "cuda"], help="设备")
+    parser.add_argument("--save-mask", action="store_true", help="保存遮罩")
     
     args = parser.parse_args()
     
