@@ -157,3 +157,93 @@ python skills/controlnet/skill.py --action load_pipeline --model-path "E:/SD_Ope
 ## 输出位置
 
 生成的输出保存在 skills/controlnet/output/ 目录下。
+
+## ControlNet 控制能力
+
+ControlNet 的作用是：**在保持原图某些特征（姿态、轮廓、深度等）不变的前提下，用 AI 重绘图片内容。**
+
+### ControlNet 类型说明
+
+| 类型 | 锁定的内容 | 应用场景 |
+|------|-----------|----------|
+| `openpose` | 人体姿态骨架 | 换衣服、换装、保持动作不变 |
+| `canny` | 边缘轮廓 | 保持构图、换风格 |
+| `depth` | 空间深度结构 | 换背景、保持场景布局 |
+| `hed` | 软边缘 | 风格转换、更灵活的重绘 |
+| `lineart` | 线稿 | 线稿上色、二次元风格转换 |
+| `normal` | 法线图 | 保持光影结构 |
+| `mlsd` | 直线 | 建筑/室内设计风格转换 |
+| `openpose_full` | 完整姿态（含手部/面部） | 精细姿态控制 |
+
+### 实际应用场景
+
+#### 1. 换衣服
+- **输入**：有人物的照片
+- **操作**：用 `openpose` 锁定姿态，用 Inpaint 遮罩衣服区域
+- **输出**：同一个人，同样的姿势，衣服被替换
+
+#### 2. 风格转换
+- **输入**：一张照片
+- **操作**：用 `canny` 或 `hed` 锁定轮廓，改变提示词
+- **输出**：同一构图，变成油画/水彩/动漫风格
+
+#### 3. 换背景
+- **输入**：一张人像
+- **操作**：用 `depth` 锁定深度结构，改变背景描述
+- **输出**：同一个人，姿态不变，背景完全改变
+
+#### 4. 线稿上色
+- **输入**：一张线稿
+- **操作**：用 `lineart` 锁定线稿，添加颜色提示词
+- **输出**：上色后的完整图片
+
+#### 5. 图片修复/扩展
+- **输入**：破损或裁剪过的图片
+- **操作**：用 `canny` 锁定现有边缘，用 Inpaint 填充缺失部分
+- **输出**：修复后的完整图片
+
+#### 6. 保持姿态的角色生成
+- **输入**：一张参考姿势图
+- **操作**：用 `openpose` 提取姿态，改变人物描述
+- **输出**：不同角色、相同姿势
+
+#### 7. 建筑/室内设计
+- **输入**：建筑或室内照片
+- **操作**：用 `mlsd` 锁定直线结构
+- **输出**：保持建筑结构，改变材质/风格
+
+### 命令示例
+
+```bash
+# 1. 换衣服（锁定姿态）
+python -m markflow.cli.commands execute remove_clothes image_path="person.jpg" controlnet_type=openpose
+
+# 2. 风格转换（锁定边缘）
+python -m markflow.cli.commands execute controlnet action=detect_pose image="photo.jpg" controlnet_type=canny
+
+# 3. 换背景（锁定深度）
+python -m markflow.cli.commands execute controlnet action=detect_pose image="photo.jpg" controlnet_type=depth
+
+# 4. 线稿上色
+python -m markflow.cli.commands execute controlnet action=detect_pose image="sketch.jpg" controlnet_type=lineart
+```
+
+### 与其他技能配合
+
+| 配合技能 | 效果 |
+|----------|------|
+| `sd_image_generator` | 从零生成图片 |
+| `remove_clothes` | 换衣服 |
+| `photo_restorer` | 修复老照片 |
+| 自建技能 | 根据需求定制 |
+
+### ControlNet 能力总结
+
+| 能力 | 说明 |
+|------|------|
+| 锁定姿态 | 保持人物动作不变 |
+| 锁定轮廓 | 保持构图不变 |
+| 锁定深度 | 保持空间结构不变 |
+| 锁定线稿 | 保持线条不变 |
+| 保持光影 | 保持光照结构不变 |
+| 任意组合 | 8 种类型，按需选择 |
