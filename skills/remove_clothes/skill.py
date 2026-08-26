@@ -1,8 +1,11 @@
 # markflow/skills/remove_clothes/skill.py
+
 """
 衣服移除 Skill - 使用本地 SD Inpaint 模型
 支持手动绘制遮罩 + ControlNet 姿态控制
 """
+
+# 修改导入部分
 
 import os
 import sys
@@ -28,14 +31,15 @@ except ImportError as e:
     DIFFUSERS_AVAILABLE = False
     logger.warning(f"依赖未安装: {e}")
 
-# ControlNet 依赖
+# 🔥 移除旧的 ControlNet 依赖检测
+# 直接导入 ControlNet 技能
 try:
-    from controlnet_aux import OpenPoseDetector
-    CONTROLNET_AVAILABLE = True
-except ImportError:
-    CONTROLNET_AVAILABLE = False
-    logger.warning("ControlNet 未安装，将使用普通 Inpaint")
-
+    from skills.controlnet.skill import Controlnet
+    CONTROLNET_SKILL_AVAILABLE = True
+    logger.info("ControlNet 技能加载成功")
+except ImportError as e:
+    CONTROLNET_SKILL_AVAILABLE = False
+    logger.warning(f"ControlNet 技能不可用: {e}")
 
 class ClothesRemover:
     """
@@ -65,13 +69,24 @@ class ClothesRemover:
         self._yolo_model = None
         self._openpose = None
         
+        # 🔥 初始化 ControlNet 技能
+        self.controlnet_skill = None
+        use_controlnet = self.config.get('use_controlnet', True)
+        if use_controlnet and CONTROLNET_SKILL_AVAILABLE:
+            try:
+                self.controlnet_skill = Controlnet(config={'device': self.device, 'max_size': 512})
+                logger.info("  ControlNet 技能初始化成功")
+            except Exception as e:
+                logger.warning(f"  ControlNet 技能初始化失败: {e}")
+                self.controlnet_skill = None
+        
         self._setup_logging()
         self._setup_config()
         
         logger.info(f"ClothesRemover 初始化完成")
         logger.info(f"  模型目录: {self.models_dir}")
         logger.info(f"  设备: {self.device}")
-        logger.info(f"  ControlNet: {'✅ 可用' if CONTROLNET_AVAILABLE else '❌ 不可用'}")
+        logger.info(f"  ControlNet: {'✅ 可用' if self.controlnet_skill else '❌ 不可用'}")
     
     def _setup_logging(self):
         """设置日志"""
@@ -90,6 +105,7 @@ class ClothesRemover:
             'default_steps': 25,
             'default_strength': 0.5,
             'use_controlnet': True,
+            'default_controlnet_type': 'canny',
             'default_prompt': 'nude body, beautiful skin, realistic skin texture, natural light, soft shadows, masterpiece, best quality, photorealistic',
             'default_negative': 'clothes, fabric, ugly, deformed, bad anatomy, extra limbs, missing limbs, bad proportions, blurry, low quality, cartoon, anime',
         }
@@ -167,7 +183,7 @@ class ClothesRemover:
             # 加载 ControlNet（如果启用）
             use_controlnet = self.config.get('use_controlnet', True)
             controlnet = None
-            if use_controlnet and CONTROLNET_AVAILABLE:
+            if use_controlnet:  # ✅ 只检查 use_controlnet
                 try:
                     logger.info("  加载 ControlNet (OpenPose)...")
                     controlnet = ControlNetModel.from_pretrained(
@@ -176,7 +192,7 @@ class ClothesRemover:
                     )
                     # 加载 OpenPose 检测器
                     from controlnet_aux import OpenPoseDetector
-                    self._openpose = OpenPoseDetector.from_pretrained("lllyasviel/ControlNet")
+                    self._openpose = OpenPoseDetector.from_pretrained("lllyasviel/Annotators")
                     logger.info("  ControlNet 加载成功")
                 except Exception as e:
                     logger.warning(f"  ControlNet 加载失败: {e}")
@@ -340,14 +356,39 @@ class ClothesRemover:
         logger.info("  自动遮罩失败，切换到手动绘制")
         return self._generate_mask_manual(image)
     
-    def _generate_pose_image(self, image: Image.Image) -> Optional[Image.Image]:
-        """生成 OpenPose 姿态图"""
-        if self._openpose is None:
+    def _generate_pose_image(self, image: Image.Image, controlnet_type: str = "canny") -> Optional[Image.Image]:
+        """
+        使用 ControlNet 技能生成姿态图
+        
+        Args:
+            image: 输入图片
+            controlnet_type: ControlNet 类型 (canny, openpose, depth, etc.)
+        """
+        if self.controlnet_skill is None:
             return None
         
         try:
-            pose = self._openpose(image)
-            return pose
+            logger.info(f"  调用 ControlNet 技能 ({controlnet_type})...")
+            result = self.controlnet_skill.execute(
+                action='detect_pose',
+                image=image,
+                controlnet_type=controlnet_type,
+                output_path=None
+            )
+            
+            if result['status'] == 'success':
+                output_path = result['output_path']
+                if os.path.exists(output_path):
+                    pose_image = Image.open(output_path)
+                    logger.info(f"  姿态图生成完成: {output_path}")
+                    return pose_image
+                else:
+                    logger.warning(f"  姿态图文件不存在: {output_path}")
+                    return None
+            else:
+                logger.warning(f"  ControlNet 检测失败: {result.get('error', '未知错误')}")
+                return None
+                
         except Exception as e:
             logger.warning(f"  姿态图生成失败: {e}")
             return None
@@ -371,7 +412,7 @@ class ClothesRemover:
                         torch_dtype=torch.float16 if self.device == 'cuda' else torch.float32,
                     )
                     from controlnet_aux import OpenPoseDetector
-                    self._openpose = OpenPoseDetector.from_pretrained("lllyasviel/ControlNet")
+                    self._openpose = OpenPoseDetector.from_pretrained("lllyasviel/Annotators")
                     logger.info("  ControlNet 加载成功")
                 except Exception as e:
                     logger.warning(f"  ControlNet 加载失败: {e}")
@@ -452,6 +493,8 @@ class ClothesRemover:
                 - output_dir: 输出目录 (可选)
                 - save_mask: 是否保存遮罩 (可选)
                 - manual_mask: 是否手动绘制遮罩 (可选)
+                - controlnet_type: ControlNet 类型 (可选)
+                - use_controlnet: 是否使用 ControlNet (可选)
         
         Returns:
             执行结果
@@ -472,6 +515,8 @@ class ClothesRemover:
             model_path = kwargs.get('model_path')
             model_name = kwargs.get('model_name')
             manual_mask = kwargs.get('manual_mask', False)
+            controlnet_type = kwargs.get('controlnet_type', self.config.get('default_controlnet_type', 'canny'))
+            use_controlnet = kwargs.get('use_controlnet', self.config.get('use_controlnet', True))
             
             # 2. 加载模型
             if model_path:
@@ -515,14 +560,15 @@ class ClothesRemover:
                 mask.save(mask_path)
                 logger.info(f"  遮罩: {os.path.basename(mask_path)}")
             
-            # 6. 生成姿态图（如果使用 ControlNet）
+            # 🔥 6. 使用 ControlNet 技能生成姿态图
             control_image = None
-            use_controlnet = self.config.get('use_controlnet', True)
-            if use_controlnet and self._openpose is not None:
-                logger.info("生成姿态图...")
-                control_image = self._generate_pose_image(image)
+            if use_controlnet and self.controlnet_skill is not None:
+                logger.info(f"生成姿态图 (controlnet_type={controlnet_type})...")
+                control_image = self._generate_pose_image(image, controlnet_type)
                 if control_image is not None:
                     logger.info("  姿态图生成完成")
+                else:
+                    logger.info("  姿态图生成失败，继续使用普通 Inpaint")
             
             # 7. 设置随机种子
             if seed == -1:
@@ -594,6 +640,7 @@ class ClothesRemover:
                     "seed": seed,
                     "device": self.device,
                     "controlnet": control_image is not None,
+                    "controlnet_type": controlnet_type if control_image is not None else None,
                     "manual_mask": manual_mask
                 },
                 "model_used": self.current_model,
@@ -633,10 +680,17 @@ if __name__ == "__main__":
     parser.add_argument("--save-mask", action="store_true", help="保存遮罩")
     parser.add_argument("--manual-mask", action="store_true", help="手动绘制遮罩")
     parser.add_argument("--no-controlnet", action="store_true", help="禁用 ControlNet")
+    parser.add_argument("--controlnet-type", default="canny",
+                        choices=["canny", "openpose", "depth", "hed", "lineart", "normal", "mlsd", "openpose_full"],
+                        help="ControlNet 类型")
     
     args = parser.parse_args()
     
-    skill = ClothesRemover(config={'device': args.device, 'use_controlnet': not args.no_controlnet})
+    skill = ClothesRemover(config={
+        'device': args.device,
+        'use_controlnet': not args.no_controlnet,
+        'default_controlnet_type': args.controlnet_type
+    })
     result = skill.execute(
         image_path=args.input,
         output_path=args.output,
@@ -647,7 +701,9 @@ if __name__ == "__main__":
         steps=args.steps,
         seed=args.seed,
         save_mask=args.save_mask,
-        manual_mask=args.manual_mask
+        manual_mask=args.manual_mask,
+        controlnet_type=args.controlnet_type,
+        use_controlnet=not args.no_controlnet
     )
     
     if result['status'] == 'success':

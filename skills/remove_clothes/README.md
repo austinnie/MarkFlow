@@ -30,6 +30,9 @@ python skills/remove_clothes/skill.py --input image.jpg --output result.jpg --mo
 # 自定义提示词
 python skills/remove_clothes/skill.py --input image.jpg --prompt "nude body, beautiful skin, realistic, masterpiece" --steps 25
 
+# 使用 ControlNet（锁定姿态）
+python skills/remove_clothes/skill.py --input image.jpg --controlnet-type openpose
+
 # 完整参数
 python skills/remove_clothes/skill.py \
   --input image.jpg \
@@ -38,9 +41,10 @@ python skills/remove_clothes/skill.py \
   --prompt "nude body, beautiful skin, realistic skin texture, natural light, soft shadows, masterpiece" \
   --negative "clothes, fabric, ugly, deformed, bad anatomy" \
   --steps 25 \
-  --strength 0.85 \
+  --strength 0.5 \
   --seed 12345 \
-  --device cpu
+  --device cpu \
+  --controlnet-type openpose
 ```
 
 ### 2. 通过 MarkFlow 框架调用
@@ -51,7 +55,8 @@ python -m markflow.cli.commands execute remove_clothes \
   model_name="zenityXmix.inpainting.safetensors" \
   prompt="nude body, beautiful skin, realistic, masterpiece" \
   steps=25 \
-  strength=0.85
+  strength=0.5 \
+  controlnet_type=openpose
 ```
 
 ## 参数说明
@@ -64,10 +69,26 @@ python -m markflow.cli.commands execute remove_clothes \
 | `--prompt` | 可选 | 见默认提示词 | 生成提示词 |
 | `--negative` | 可选 | 见默认负面词 | 负面提示词 |
 | `--steps` | 可选 | 25 | 迭代步数 |
-| `--strength` | 可选 | 0.85 | 重绘强度 (0.0-1.0) |
+| `--strength` | 可选 | 0.5 | 重绘强度 (0.0-1.0) |
 | `--seed` | 可选 | -1 (随机) | 随机种子 |
 | `--device` | 可选 | cpu | 设备 (cpu/cuda) |
 | `--save-mask` | 可选 | False | 是否保存遮罩 |
+| `--manual-mask` | 可选 | False | 手动绘制遮罩 |
+| `--no-controlnet` | 可选 | False | 禁用 ControlNet |
+| `--controlnet-type` | 可选 | `canny` | ControlNet 类型: canny, openpose, depth, hed, lineart, normal, mlsd, openpose_full |
+
+## ControlNet 类型说明
+
+| 类型 | 说明 | 适用场景 |
+|------|------|----------|
+| `canny` | 边缘轮廓控制 | 保持构图，通用场景 |
+| `openpose` | 人体姿态骨架 | 换衣服、保持动作（推荐） |
+| `depth` | 深度图控制 | 保持空间结构、换背景 |
+| `hed` | 软边缘控制 | 风格转换、更灵活的重绘 |
+| `lineart` | 线稿提取 | 线稿上色、二次元风格 |
+| `normal` | 法线图控制 | 保持光影结构 |
+| `mlsd` | 直线检测 | 建筑/室内设计 |
+| `openpose_full` | 完整姿态（含手部/面部） | 精细姿态控制 |
 
 ## 默认提示词
 
@@ -107,8 +128,9 @@ clothes, fabric, ugly, deformed, bad anatomy, extra limbs, missing limbs, bad pr
 
 1. **人体检测**：使用 YOLOv8-seg 检测人体，生成全身遮罩
 2. **提取躯干**：从全身遮罩中提取躯干区域（脖子到臀部），排除头部和腿部
+3. **ControlNet** 姿态控制：使用 ControlNet 技能生成姿态图，锁定人物姿态
 3. **SD Inpaint**：在遮罩区域使用 Stable Diffusion Inpaint 生成新内容
-4. **输出结果**：保持原始尺寸，保存为 PNG/JPG
+5. **输出结果**：保持原始尺寸，保存为 PNG/JPG
 
 ## 示例
 
@@ -137,6 +159,15 @@ A:
 - 描述想要的身体效果：`nude body, beautiful skin, realistic`
 - 描述光影：`soft natural light, warm tones`
 - 保持简洁：`naked woman, photorealistic, masterpiece`
+
+### Q: 衣服没变化怎么办？
+A: 尝试增加 --strength（如 0.6-0.7）或使用 --controlnet-type openpose。
+
+### Q: 人物姿态变了怎么办？
+A: 使用 --controlnet-type openpose 或 --controlnet-type canny 锁定姿态和轮廓。
+
+### Q: 不同图片需要调整参数吗？
+A: 需要。不同图片的光线、姿态、衣服类型不同，建议先默认参数测试，再根据效果调整 strength 和 controlnet-type。
 
 ## 版本信息
 
