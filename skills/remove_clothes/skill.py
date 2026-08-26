@@ -203,8 +203,14 @@ class ClothesRemover:
                 "lllyasviel/control_v11p_sd15_openpose",
                 torch_dtype=torch.float16 if self.device == 'cuda' else torch.float32,
             )
-            from controlnet_aux import OpenPoseDetector
+
+            try:
+                from controlnet_aux import OpenPoseDetector
+            except ImportError:
+                from controlnet_aux import OpenposeDetector as OpenPoseDetector
+
             self._openpose = OpenPoseDetector.from_pretrained("lllyasviel/Annotators")
+
             logger.info("  ControlNet 加载成功")
             return controlnet
         except Exception as e:
