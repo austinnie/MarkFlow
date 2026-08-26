@@ -1,7 +1,7 @@
 # markflow/skills/remove_clothes/skill.py
 """
 衣服移除 Skill - 使用本地 SD Inpaint 模型
-支持手动绘制遮罩 + ControlNet 姿态控制
+支持多种分割方案: YOLO, Manual, CLIPSeg, SAM, Grounding DINO
 """
 
 import os
@@ -37,6 +37,15 @@ except ImportError as e:
     CONTROLNET_SKILL_AVAILABLE = False
     logger.warning(f"ControlNet 技能不可用: {e}")
 
+# ==================== 分割模块 ====================
+from .segmentation import (
+    segment_with_yolo,
+    segment_manual,
+    segment_with_clipseg,
+    segment_with_sam,
+    segment_with_grounding_dino,
+)
+
 # YOLO
 try:
     from ultralytics import YOLO
@@ -55,6 +64,9 @@ class ClothesRemover:
     # 支持的图片格式
     SUPPORTED_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.webp', '.bmp')
 
+    # 支持的分割方法
+    SEGMENTATION_METHODS = ['yolo', 'manual', 'clipseg', 'sam', 'grounding_dino']
+
     def __init__(self, config: Dict[str, Any] = None):
         """
         初始化技能
@@ -69,6 +81,7 @@ class ClothesRemover:
                 - default_prompt: 默认提示词
                 - default_negative: 默认负面提示词
                 - default_controlnet_type: 默认 ControlNet 类型
+                - default_seg_method: 默认分割方法
                 - use_controlnet: 是否启用 ControlNet
                 - auto_resize: 是否自动缩放图片
                 - min_size: 最小尺寸
@@ -93,6 +106,9 @@ class ClothesRemover:
         self.min_size = self.config.get('min_size', 512)
         self.max_size = self.config.get('max_size', 1024)
 
+        # 分割方法配置
+        self.default_seg_method = self.config.get('default_seg_method', 'yolo')
+
         # 运行时状态
         self.pipeline = None
         self.current_model = None
@@ -116,6 +132,7 @@ class ClothesRemover:
         logger.info(f"  设备: {self.device}")
         logger.info(f"  ControlNet: {'✅ 可用' if self.controlnet_skill else '❌ 不可用'}")
         logger.info(f"  YOLO: {'✅ 可用' if YOLO_AVAILABLE else '❌ 不可用'}")
+        logger.info(f"  默认分割: {self.default_seg_method}")
 
     # ==================== 初始化方法 ====================
 
@@ -134,6 +151,7 @@ class ClothesRemover:
             'default_strength': 0.5,
             'use_controlnet': True,
             'default_controlnet_type': 'canny',
+            'default_seg_method': 'yolo',
             'default_prompt': 'nude body, beautiful skin, realistic skin texture, natural light, soft shadows, masterpiece, best quality, photorealistic',
             'default_negative': 'clothes, fabric, ugly, deformed, bad anatomy, extra limbs, missing limbs, bad proportions, blurry, low quality, cartoon, anime',
         }
@@ -153,16 +171,13 @@ class ClothesRemover:
         logger.info(f"查找模型: '{model_name}'")
         logger.info(f"模型目录: {self.models_dir}")
 
-        # 1. 直接查找
         direct_path = self.models_dir / model_name
         if direct_path.exists():
             logger.info(f"  找到: {direct_path}")
             return direct_path
 
-        # 2. 提取文件名
         filename = os.path.basename(model_name)
 
-        # 3. 在子目录中查找
         subdirs = ['sd-v1-5', 'sdxl']
         for subdir in subdirs:
             sub_path = self.models_dir / subdir / filename
@@ -170,7 +185,6 @@ class ClothesRemover:
                 logger.info(f"  找到: {sub_path}")
                 return sub_path
 
-        # 4. 遍历所有子目录
         for subdir in self.models_dir.iterdir():
             if subdir.is_dir():
                 file_path = subdir / filename
@@ -255,158 +269,68 @@ class ClothesRemover:
             use_controlnet=self.config.get('use_controlnet', True)
         )
 
-    # ==================== 遮罩生成 ====================
+    # ==================== 遮罩生成（使用分割模块） ====================
 
-    def _get_yolo_model(self):
-        """获取 YOLO 模型（懒加载）"""
-        if not YOLO_AVAILABLE:
-            return None
+    def _generate_mask(self, image: Image.Image, method: str = None, **kwargs) -> Image.Image:
+        """
+        生成衣服遮罩，支持多种分割方案
 
-        if self._yolo_model is None:
-            try:
-                self._yolo_model = YOLO("yolov8n-seg.pt")
-                logger.info("  YOLO 加载成功")
-            except Exception as e:
-                logger.warning(f"  YOLO 加载失败: {e}")
-                self._yolo_model = False
-        return self._yolo_model
+        Args:
+            image: PIL Image
+            method: 分割方法 (yolo | manual | clipseg | sam | grounding_dino)
+            **kwargs: 额外参数
+                - text: CLIPSeg/Grounding DINO 的文字提示
+                - points: SAM 的点击点
+        """
+        method = method or self.default_seg_method
+        logger.info(f"  使用分割方法: {method}")
 
-    def _generate_mask_auto(self, image: Image.Image) -> Optional[Image.Image]:
-        """自动生成遮罩（使用 YOLO）"""
-        h, w = image.size[1], image.size[0]
+        if method == 'yolo':
+            mask = segment_with_yolo(image)
+            if mask is not None:
+                return mask
+            logger.info("  YOLO 失败，降级到手动绘制")
+            return segment_manual(image)
 
-        yolo = self._get_yolo_model()
-        if not yolo:
-            return None
+        elif method == 'manual':
+            return segment_manual(image)
 
-        try:
-            results = yolo(image, verbose=False)
-            if len(results) == 0 or results[0].masks is None:
-                return None
+        elif method == 'clipseg':
+            text = kwargs.get('text', 'clothes, dress, shirt')
+            mask = segment_with_clipseg(image, text=text)
+            if mask is not None:
+                return mask
+            logger.info("  CLIPSeg 失败，降级到 YOLO")
+            return self._generate_mask(image, method='yolo')
 
-            masks = results[0].masks.data.cpu().numpy()
-            combined = np.zeros((h, w), dtype=np.uint8)
-            for m in masks:
-                m_resized = cv2.resize(m, (w, h))
-                combined = np.maximum(combined, (m_resized > 0.5).astype(np.uint8) * 255)
+        elif method == 'sam':
+            points = kwargs.get('points')
+            if points is None:
+                from .segmentation.sam import get_points_from_click
+                result = get_points_from_click(image)
+                if result is None:
+                    logger.info("  SAM 未获取到点，降级到 YOLO")
+                    return self._generate_mask(image, method='yolo')
+                points, labels = result
+            else:
+                labels = [1] * len(points)
+            mask = segment_with_sam(image, points, labels)
+            if mask is not None:
+                return mask
+            logger.info("  SAM 失败，降级到 YOLO")
+            return self._generate_mask(image, method='yolo')
 
-            coords = np.where(combined > 0)
-            if len(coords[0]) == 0:
-                return None
+        elif method == 'grounding_dino':
+            text = kwargs.get('text', 'clothes')
+            mask = segment_with_grounding_dino(image, text=text)
+            if mask is not None:
+                return mask
+            logger.info("  Grounding DINO 失败，降级到 YOLO")
+            return self._generate_mask(image, method='yolo')
 
-            y_min, y_max = coords[0].min(), coords[0].max()
-            body_h = y_max - y_min
-
-            # 躯干范围：脖子到臀部
-            neck = y_min + int(body_h * 0.18)
-            hip = y_min + int(body_h * 0.65)
-
-            x_min, x_max = coords[1].min(), coords[1].max()
-            body_w = x_max - x_min
-            left = x_min + int(body_w * 0.08)
-            right = x_max - int(body_w * 0.08)
-
-            clothes = np.zeros_like(combined)
-            clothes[neck:hip, left:right] = combined[neck:hip, left:right]
-
-            # 平滑边缘
-            kernel = np.ones((5, 5), np.uint8)
-            clothes = cv2.dilate(clothes, kernel, iterations=1)
-            clothes = cv2.GaussianBlur(clothes, (9, 9), 0)
-
-            if np.sum(clothes > 0) < 100:
-                return None
-
-            return Image.fromarray(clothes, mode="L")
-
-        except Exception as e:
-            logger.warning(f"  YOLO 分割失败: {e}")
-            return None
-
-    def _generate_mask_manual(self, image: Image.Image) -> Image.Image:
-        """手动绘制遮罩（鼠标交互）"""
-        import cv2
-
-        img_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-        h, w = img_cv.shape[:2]
-
-        overlay = np.zeros((h, w, 3), dtype=np.uint8)
-        mask = np.zeros((h, w), dtype=np.uint8)
-        drawing = False
-        brush_size = 30
-
-        print("\n" + "=" * 50)
-        print("手动绘制遮罩模式")
-        print("=" * 50)
-        print("  按住鼠标左键绘制遮罩（白色区域）")
-        print("  滚轮调节画笔大小")
-        print("  按 R 键重置遮罩")
-        print("  按 Q 或 空格键 完成绘制")
-        print("=" * 50 + "\n")
-
-        def draw_callback(event, x, y, flags, param):
-            nonlocal drawing, brush_size
-            if event == cv2.EVENT_LBUTTONDOWN:
-                drawing = True
-                cv2.circle(mask, (x, y), brush_size, 255, -1)
-                cv2.circle(overlay, (x, y), brush_size, (0, 255, 0), -1)
-            elif event == cv2.EVENT_MOUSEMOVE:
-                if drawing:
-                    cv2.circle(mask, (x, y), brush_size, 255, -1)
-                    cv2.circle(overlay, (x, y), brush_size, (0, 255, 0), -1)
-            elif event == cv2.EVENT_LBUTTONUP:
-                drawing = False
-            elif event == cv2.EVENT_MOUSEWHEEL:
-                delta = flags
-                brush_size = min(100, max(5, brush_size + (5 if delta > 0 else -5)))
-                print(f"   画笔大小: {brush_size}")
-
-        cv2.namedWindow('Draw Mask - Remove Clothes')
-        cv2.setMouseCallback('Draw Mask - Remove Clothes', draw_callback)
-
-        while True:
-            display = img_cv.copy()
-            mask_overlay = cv2.addWeighted(display, 0.5, overlay, 0.5, 0)
-
-            cv2.putText(mask_overlay, f"Brush: {brush_size}", (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-            cv2.putText(mask_overlay, "Draw clothes, press Q to finish", (10, 60),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
-
-            cv2.imshow('Draw Mask - Remove Clothes', mask_overlay)
-            key = cv2.waitKey(1) & 0xFF
-
-            if key == ord('q') or key == 32:
-                break
-            elif key == ord('r'):
-                mask = np.zeros((h, w), dtype=np.uint8)
-                overlay = np.zeros((h, w, 3), dtype=np.uint8)
-                print("  遮罩已重置")
-
-        cv2.destroyAllWindows()
-
-        if np.sum(mask > 0) < 100:
-            print("  遮罩区域太小，使用椭圆默认遮罩")
-            mask = np.zeros((h, w), dtype=np.uint8)
-            cx, cy = w // 2, h // 2
-            cv2.ellipse(mask, (cx, cy), (w // 4, h // 3), 0, 0, 360, 255, -1)
-
-        mask = cv2.GaussianBlur(mask, (21, 21), 0)
-        print(f"  遮罩完成，覆盖 {np.sum(mask > 0)} 像素")
-        return Image.fromarray(mask, mode="L")
-
-    def _generate_mask(self, image: Image.Image, use_manual: bool = False) -> Image.Image:
-        """生成衣服遮罩"""
-        if use_manual:
-            return self._generate_mask_manual(image)
-
-        mask = self._generate_mask_auto(image)
-        if mask is not None:
-            logger.info("  使用 YOLO 自动遮罩")
-            return mask
-
-        logger.info("  自动遮罩失败，切换到手动绘制")
-        return self._generate_mask_manual(image)
+        else:
+            logger.warning(f"  未知分割方法: {method}，使用 YOLO")
+            return self._generate_mask(image, method='yolo')
 
     # ==================== ControlNet 集成 ====================
 
@@ -490,23 +414,7 @@ class ClothesRemover:
         output_dir: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
-        """
-        批量处理目录下的所有图片
-
-        Args:
-            input_dir: 输入目录
-            output_dir: 输出目录
-            **kwargs: 同 execute 参数
-
-        Returns:
-            {
-                "status": "success" | "error",
-                "total": 总数,
-                "success": 成功数,
-                "failed": 失败数,
-                "results": [...]
-            }
-        """
+        """批量处理目录下的所有图片"""
         input_path = Path(input_dir)
         if not input_path.exists():
             return {"status": "error", "error": f"目录不存在: {input_dir}"}
@@ -516,7 +424,6 @@ class ClothesRemover:
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        # 收集图片
         images = []
         for ext in self.SUPPORTED_EXTENSIONS:
             images.extend(input_path.glob(f"*{ext}"))
@@ -578,13 +485,15 @@ class ClothesRemover:
             seed: 随机种子 (可选)
             output_dir: 输出目录 (可选)
             save_mask: 是否保存遮罩 (可选)
-            manual_mask: 是否手动绘制遮罩 (可选)
+            seg_method: 分割方法 (yolo | manual | clipseg | sam | grounding_dino)
+            seg_text: CLIPSeg/Grounding DINO 的文字提示
             controlnet_type: ControlNet 类型 (可选)
             use_controlnet: 是否使用 ControlNet (可选)
 
         Returns:
             执行结果
         """
+        logger.info(f"execute 收到参数: {kwargs}")  # 添加这行        
         start_time = time.time()
         logger.info(f"执行技能: {self.name} (v{self.version})")
 
@@ -592,22 +501,30 @@ class ClothesRemover:
             # 1. 获取参数
             image_path = kwargs.get('image_path')
             if not image_path:
-                return {"status": "error", "error": "image_path 是必填参数"}
+                error_msg = "❌ image_path 是必填参数"
+                print(error_msg)
+                return {"status": "error", "error": error_msg}
 
             if not os.path.exists(image_path):
-                return {"status": "error", "error": f"图片不存在: {image_path}"}
+                error_msg = f"❌ 图片不存在: {image_path}"
+                print(error_msg)
+                logger.error(error_msg)
+                return {"status": "error", "error": error_msg}
 
             output_path = kwargs.get('output_path')
             model_path = kwargs.get('model_path')
             model_name = kwargs.get('model_name')
-            manual_mask = kwargs.get('manual_mask', False)
+            seg_method = kwargs.get('seg_method', self.default_seg_method)
+            seg_text = kwargs.get('seg_text', 'clothes')
             controlnet_type = kwargs.get('controlnet_type', self.config.get('default_controlnet_type', 'canny'))
             use_controlnet = kwargs.get('use_controlnet', self.config.get('use_controlnet', True))
 
             # 2. 加载模型
             if model_path:
                 if not self._load_model_from_path(model_path):
-                    return {"status": "error", "error": f"无法加载模型: {model_path}"}
+                    error_msg = f"❌ 无法加载模型: {model_path}"
+                    print(error_msg)
+                    return {"status": "error", "error": error_msg}
             else:
                 model_name = model_name or self.config.get('default_model', 'zenityXmix.inpainting.safetensors')
                 if self.pipeline is None or self.current_model != model_name:
@@ -635,9 +552,9 @@ class ClothesRemover:
 
             logger.info(f"处理: {os.path.basename(image_path)} ({image.size[0]}x{image.size[1]})")
 
-            # 5. 生成遮罩
+            # 5. 生成遮罩（使用指定的分割方法）
             logger.info("生成遮罩...")
-            mask = self._generate_mask(image, use_manual=manual_mask)
+            mask = self._generate_mask(image, method=seg_method, text=seg_text)
 
             if save_mask:
                 mask_path = image_path.replace('.png', '_mask.png').replace('.jpg', '_mask.png')
@@ -713,9 +630,9 @@ class ClothesRemover:
                     "steps": steps,
                     "seed": seed,
                     "device": self.device,
+                    "seg_method": seg_method,
                     "controlnet": control_image is not None,
                     "controlnet_type": controlnet_type if control_image is not None else None,
-                    "manual_mask": manual_mask
                 },
                 "model_used": self.current_model,
                 "generation_time": f"{generation_time:.2f}s",
@@ -753,18 +670,24 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=-1, help="随机种子")
     parser.add_argument("--device", choices=["cpu", "cuda"], default="cpu", help="设备")
     parser.add_argument("--save-mask", action="store_true", help="保存遮罩")
-    parser.add_argument("--manual-mask", action="store_true", help="手动绘制遮罩")
     parser.add_argument("--no-controlnet", action="store_true", help="禁用 ControlNet")
     parser.add_argument("--controlnet-type", default="canny",
                         choices=["canny", "openpose", "depth", "hed", "lineart", "normal", "mlsd", "openpose_full"],
                         help="ControlNet 类型")
+    # 分割方法参数
+    parser.add_argument("--seg-method", default="yolo",
+                        choices=["yolo", "manual", "clipseg", "sam", "grounding_dino"],
+                        help="分割方法")
+    parser.add_argument("--seg-text", default="clothes",
+                        help="CLIPSeg/Grounding DINO 的文字提示")
 
     args = parser.parse_args()
 
     skill = ClothesRemover(config={
         'device': args.device,
         'use_controlnet': not args.no_controlnet,
-        'default_controlnet_type': args.controlnet_type
+        'default_controlnet_type': args.controlnet_type,
+        'default_seg_method': args.seg_method,
     })
 
     if args.batch:
@@ -778,7 +701,8 @@ if __name__ == "__main__":
             steps=args.steps,
             seed=args.seed,
             save_mask=args.save_mask,
-            manual_mask=args.manual_mask,
+            seg_method=args.seg_method,
+            seg_text=args.seg_text,
             controlnet_type=args.controlnet_type,
             use_controlnet=not args.no_controlnet
         )
@@ -794,7 +718,8 @@ if __name__ == "__main__":
             steps=args.steps,
             seed=args.seed,
             save_mask=args.save_mask,
-            manual_mask=args.manual_mask,
+            seg_method=args.seg_method,
+            seg_text=args.seg_text,
             controlnet_type=args.controlnet_type,
             use_controlnet=not args.no_controlnet
         )
