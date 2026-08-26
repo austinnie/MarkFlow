@@ -2,6 +2,7 @@
 """
 衣服移除 Skill - 使用本地 SD Inpaint 模型
 支持多种分割方案: YOLO, Manual, CLIPSeg, SAM, Grounding DINO
+ControlNet 和 Inpaint 分离执行
 """
 
 import os
@@ -22,7 +23,7 @@ try:
     import numpy as np
     from PIL import Image, ImageDraw, ImageFilter
     import cv2
-    from diffusers import StableDiffusionInpaintPipeline, ControlNetModel
+    from diffusers import StableDiffusionInpaintPipeline
     DIFFUSERS_AVAILABLE = True
 except ImportError as e:
     DIFFUSERS_AVAILABLE = False
@@ -59,6 +60,7 @@ except ImportError:
 class ClothesRemover:
     """
     衣服移除技能 - 使用本地 SD Inpaint 模型
+    ControlNet 和 Inpaint 分离执行
     """
 
     # 支持的图片格式
@@ -73,19 +75,6 @@ class ClothesRemover:
 
         Args:
             config: 配置字典
-                - device: 设备 (cpu/cuda)
-                - output_dir: 输出目录
-                - default_model: 默认模型名称
-                - default_steps: 默认步数
-                - default_strength: 默认强度
-                - default_prompt: 默认提示词
-                - default_negative: 默认负面提示词
-                - default_controlnet_type: 默认 ControlNet 类型
-                - default_seg_method: 默认分割方法
-                - use_controlnet: 是否启用 ControlNet
-                - auto_resize: 是否自动缩放图片
-                - min_size: 最小尺寸
-                - max_size: 最大尺寸
         """
         self.config = config or {}
         self.name = "remove_clothes"
@@ -113,9 +102,8 @@ class ClothesRemover:
         self.pipeline = None
         self.current_model = None
         self._yolo_model = None
-        self._openpose = None
 
-        # ControlNet 技能
+        # ============ ControlNet 技能（独立于 Inpaint Pipeline） ============
         self.controlnet_skill = None
         if self.config.get('use_controlnet', True) and CONTROLNET_SKILL_AVAILABLE:
             try:
@@ -130,7 +118,7 @@ class ClothesRemover:
         logger.info(f"ClothesRemover 初始化完成")
         logger.info(f"  模型目录: {self.models_dir}")
         logger.info(f"  设备: {self.device}")
-        logger.info(f"  ControlNet: {'✅ 可用' if self.controlnet_skill else '❌ 不可用'}")
+        logger.info(f"  ControlNet 技能: {'✅ 可用' if self.controlnet_skill else '❌ 不可用'}")
         logger.info(f"  YOLO: {'✅ 可用' if YOLO_AVAILABLE else '❌ 不可用'}")
         logger.info(f"  默认分割: {self.default_seg_method}")
 
@@ -195,41 +183,17 @@ class ClothesRemover:
         logger.error(f"未找到模型: '{model_name}'")
         return None
 
-    def _load_controlnet(self) -> Optional[ControlNetModel]:
-        """加载 ControlNet 模型"""
+    def _load_pipeline(self, model_path: Path) -> bool:
+        """
+        加载纯 Inpaint Pipeline（不加载 ControlNet）
+        ControlNet 通过 control_image 参数传入
+        """
         try:
-            logger.info("  加载 ControlNet (OpenPose)...")
-            controlnet = ControlNetModel.from_pretrained(
-                "lllyasviel/control_v11p_sd15_openpose",
-                torch_dtype=torch.float16 if self.device == 'cuda' else torch.float32,
-            )
-
-            try:
-                from controlnet_aux import OpenPoseDetector
-            except ImportError:
-                from controlnet_aux import OpenposeDetector as OpenPoseDetector
-
-            self._openpose = OpenPoseDetector.from_pretrained("lllyasviel/Annotators")
-
-            logger.info("  ControlNet 加载成功")
-            return controlnet
-        except Exception as e:
-            logger.warning(f"  ControlNet 加载失败: {e}")
-            return None
-
-    def _load_pipeline(self, model_path: Path, use_controlnet: bool = True) -> bool:
-        """加载 SD Pipeline"""
-        try:
-            controlnet = None
-            if use_controlnet:
-                controlnet = self._load_controlnet()
-
             self.pipeline = StableDiffusionInpaintPipeline.from_single_file(
                 str(model_path),
                 torch_dtype=torch.float16 if self.device == 'cuda' else torch.float32,
                 safety_checker=None,
                 requires_safety_checker=False,
-                controlnet=controlnet,
             )
             self.pipeline.to(self.device)
             self.pipeline.enable_attention_slicing()
@@ -254,10 +218,7 @@ class ClothesRemover:
             return False
 
         logger.info(f"加载模型: {model_path}")
-        return self._load_pipeline(
-            model_path,
-            use_controlnet=self.config.get('use_controlnet', True)
-        )
+        return self._load_pipeline(model_path)
 
     def _load_model_from_path(self, model_path: str) -> bool:
         """加载模型（通过路径）"""
@@ -270,23 +231,13 @@ class ClothesRemover:
             return False
 
         logger.info(f"从路径加载模型: {model_path}")
-        return self._load_pipeline(
-            Path(model_path),
-            use_controlnet=self.config.get('use_controlnet', True)
-        )
+        return self._load_pipeline(Path(model_path))
 
     # ==================== 遮罩生成（使用分割模块） ====================
 
     def _generate_mask(self, image: Image.Image, method: str = None, **kwargs) -> Image.Image:
         """
         生成衣服遮罩，支持多种分割方案
-
-        Args:
-            image: PIL Image
-            method: 分割方法 (yolo | manual | clipseg | sam | grounding_dino)
-            **kwargs: 额外参数
-                - text: CLIPSeg/Grounding DINO 的文字提示
-                - points: SAM 的点击点
         """
         method = method or self.default_seg_method
         logger.info(f"  使用分割方法: {method}")
@@ -338,10 +289,12 @@ class ClothesRemover:
             logger.warning(f"  未知分割方法: {method}，使用 YOLO")
             return self._generate_mask(image, method='yolo')
 
-    # ==================== ControlNet 集成 ====================
+    # ==================== ControlNet 集成（分离执行） ====================
 
     def _generate_pose_image(self, image: Image.Image, controlnet_type: str = "canny") -> Optional[Image.Image]:
-        """使用 ControlNet 技能生成姿态图"""
+        """
+        使用 ControlNet 技能生成姿态图（独立于 Inpaint Pipeline）
+        """
         if self.controlnet_skill is None:
             return None
 
@@ -479,27 +432,11 @@ class ClothesRemover:
         """
         执行衣服移除
 
-        Args:
-            image_path: 输入图片路径 (必填)
-            output_path: 输出图片路径 (可选)
-            model_name: 模型名称 (可选)
-            model_path: 模型路径 (可选)
-            prompt: 生成提示词 (可选)
-            negative_prompt: 负面提示词 (可选)
-            strength: 重绘强度 (可选)
-            steps: 迭代步数 (可选)
-            seed: 随机种子 (可选)
-            output_dir: 输出目录 (可选)
-            save_mask: 是否保存遮罩 (可选)
-            seg_method: 分割方法 (yolo | manual | clipseg | sam | grounding_dino)
-            seg_text: CLIPSeg/Grounding DINO 的文字提示
-            controlnet_type: ControlNet 类型 (可选)
-            use_controlnet: 是否使用 ControlNet (可选)
-
-        Returns:
-            执行结果
+        ControlNet 和 Inpaint 分离执行：
+        1. ControlNet 技能生成姿态图
+        2. Inpaint Pipeline 使用姿态图作为 control_image 参考
         """
-        logger.info(f"execute 收到参数: {kwargs}")  # 添加这行        
+        logger.info(f"execute 收到参数: {kwargs}")
         start_time = time.time()
         logger.info(f"执行技能: {self.name} (v{self.version})")
 
@@ -525,7 +462,7 @@ class ClothesRemover:
             controlnet_type = kwargs.get('controlnet_type', self.config.get('default_controlnet_type', 'canny'))
             use_controlnet = kwargs.get('use_controlnet', self.config.get('use_controlnet', True))
 
-            # 2. 加载模型
+            # 2. 加载模型（纯 Inpaint Pipeline，不加载 ControlNet）
             if model_path:
                 if not self._load_model_from_path(model_path):
                     error_msg = f"❌ 无法加载模型: {model_path}"
@@ -558,7 +495,7 @@ class ClothesRemover:
 
             logger.info(f"处理: {os.path.basename(image_path)} ({image.size[0]}x{image.size[1]})")
 
-            # 5. 生成遮罩（使用指定的分割方法）
+            # 5. 生成遮罩
             logger.info("生成遮罩...")
             mask = self._generate_mask(image, method=seg_method, text=seg_text)
 
@@ -567,15 +504,15 @@ class ClothesRemover:
                 mask.save(mask_path)
                 logger.info(f"  遮罩: {os.path.basename(mask_path)}")
 
-            # 6. 生成姿态图（ControlNet）
+            # ============ 6. ControlNet 生成姿态图（独立执行） ============
             control_image = None
             if use_controlnet and self.controlnet_skill is not None:
                 logger.info(f"生成姿态图 (controlnet_type={controlnet_type})...")
                 control_image = self._generate_pose_image(image, controlnet_type)
                 if control_image is not None:
-                    logger.info("  姿态图生成完成")
+                    logger.info("  ✅ 姿态图生成完成")
                 else:
-                    logger.info("  姿态图生成失败，继续使用普通 Inpaint")
+                    logger.info("  ⚠️ 姿态图生成失败，继续使用普通 Inpaint")
 
             # 7. 设置随机种子
             if seed == -1:
@@ -588,9 +525,9 @@ class ClothesRemover:
             logger.info(f"  强度: {strength}")
             logger.info(f"  种子: {seed}")
             if control_image is not None:
-                logger.info("  ControlNet: 已启用")
+                logger.info("  ControlNet: 姿态图已传入 (分离模式)")
 
-            # 8. 执行 Inpaint
+            # ============ 8. 执行 Inpaint（使用 control_image 参数） ============
             current_size = image.size
             pipeline_kwargs = {
                 'prompt': prompt,
@@ -605,6 +542,7 @@ class ClothesRemover:
                 'height': current_size[1],
             }
 
+            # 将 ControlNet 姿态图作为 control_image 传入
             if control_image is not None:
                 pipeline_kwargs['control_image'] = control_image
 
