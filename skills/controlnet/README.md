@@ -23,6 +23,65 @@ pip install Pillow
 pip install numpy
 ```
 
+##  ControlNet 模型
+ControlNet 技能需要下载 ControlNet 模型，首次运行时会自动从 HuggingFace 下载。
+
+### 自动下载（推荐）：
+
+运行以下命令会自动下载模型：
+
+```bash
+# 查看状态（会自动检查并下载缺失的模型）
+python -m markflow.cli.commands execute controlnet action=status
+
+# 或直接检测姿态
+python -m markflow.cli.commands execute controlnet action=detect_pose image="test.jpg"
+```
+
+### 手动下载：
+
+如果自动下载失败，可以运行下载脚本：
+
+```bash
+# 直接下载
+python scripts/download_controlnet.py
+
+# 使用镜像加速（国内用户）
+set HF_ENDPOINT=https://hf-mirror.com
+python scripts/download_controlnet.py
+```
+
+### 模型列表
+
+| 模型 | 大小 | 用途 |
+|------|------|------|
+| `lllyasviel/control_v11p_sd15_openpose` | ~1.5 GB | OpenPose 姿态检测 |
+| `lllyasviel/sd-controlnet-canny` | ~1.5 GB | Canny 边缘检测 |
+| `lllyasviel/sd-controlnet-depth` | ~1.5 GB | Depth 深度检测 |
+| `lllyasviel/sd-controlnet-hed` | ~1.5 GB | HED 软边缘检测 |
+| `lllyasviel/control_v11p_sd15_lineart` | ~1.5 GB | Lineart 线稿提取 |
+| `lllyasviel/sd-controlnet-normal` | ~1.5 GB | Normal 法线检测 |
+| `lllyasviel/sd-controlnet-mlsd` | ~1.5 GB | MLSD 直线检测 |
+
+> **注**：首次运行 `detect_pose` 时会自动下载对应的 ControlNet 模型。
+
+
+### 缓存位置：
+
+模型默认下载到 HuggingFace 缓存目录：
+
+```text
+C:\Users\用户名\.cache\huggingface\hub\
+```
+
+或自定义缓存位置：
+
+```bash
+set HF_HOME=E:\hf_cache\.cache
+python -m markflow.cli.commands execute controlnet action=detect_pose image="test.jpg"
+```
+
+
 ## 参数说明
 
 | 参数 | 类型 | 默认值 | 说明 |

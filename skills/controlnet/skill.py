@@ -33,7 +33,7 @@ except ImportError as e:
 
 try:
     from controlnet_aux import (
-        OpenPoseDetector,
+        OpenposeDetector,
         CannyDetector,
         HEDdetector,
         MidasDetector,
@@ -48,26 +48,8 @@ except ImportError as e:
     logger.warning(f"controlnet_aux 未安装: {e}")
 
 
-# ==================== ControlNet 类型配置 ====================
+# ==================== ControlNet 类型配置（无需 mediapipe） ====================
 CONTROLNET_TYPES = {
-    "openpose": {
-        "name": "OpenPose (姿态)",
-        "model_id": "lllyasviel/sd-controlnet-openpose",
-        "preprocessor": "openpose",
-        "description": "检测人体姿态骨架，适合换装、换姿势"
-    },
-    "openpose_full": {
-        "name": "OpenPose Full (完整姿态)",
-        "model_id": "lllyasviel/control_v11p_sd15_openpose",
-        "preprocessor": "openpose_full",
-        "description": "全身姿态 + 手指 + 面部表情"
-    },
-    "dwpose": {
-        "name": "DWPose (增强姿态)",
-        "model_id": "lllyasviel/sd-controlnet-openpose",
-        "preprocessor": "dwpose",
-        "description": "更精准的姿态检测"
-    },
     "canny": {
         "name": "Canny (边缘)",
         "model_id": "lllyasviel/sd-controlnet-canny",
@@ -103,6 +85,18 @@ CONTROLNET_TYPES = {
         "model_id": "lllyasviel/sd-controlnet-mlsd",
         "preprocessor": "mlsd",
         "description": "直线检测，适合建筑"
+    },
+    "openpose": {
+        "name": "OpenPose (姿态)",
+        "model_id": "lllyasviel/sd-controlnet-openpose",
+        "preprocessor": "openpose",
+        "description": "检测人体姿态骨架，适合换装、换姿势"
+    },
+    "openpose_full": {
+        "name": "OpenPose Full (完整姿态)",
+        "model_id": "lllyasviel/control_v11p_sd15_openpose",
+        "preprocessor": "openpose_full",
+        "description": "全身姿态 + 手指 + 面部表情"
     },
 }
 
@@ -185,16 +179,28 @@ class Controlnet:
             return self._detectors[controlnet_type]
 
         try:
+            #detectors = {
+            #    "openpose": lambda: OpenposeDetector.from_pretrained("lllyasviel/ControlNet"),  # 修改这里
+            #    "openpose_full": lambda: OpenposeDetector.from_pretrained("lllyasviel/ControlNet"),
+            #    "dwpose": lambda: DWposeDetector.from_pretrained("lllyasviel/ControlNet"),
+            #    "canny": lambda: CannyDetector(),
+            #    "hed": lambda: HEDdetector.from_pretrained("lllyasviel/ControlNet"),
+            #    "lineart": lambda: LineartDetector.from_pretrained("lllyasviel/ControlNet"),
+            #    "depth": lambda: MidasDetector.from_pretrained("lllyasviel/ControlNet"),
+            #    "normal": lambda: NormalBaeDetector.from_pretrained("lllyasviel/ControlNet"),
+            #    "mlsd": lambda: MLSDdetector.from_pretrained("lllyasviel/ControlNet"),
+            #}
+
             detectors = {
-                "openpose": lambda: OpenPoseDetector.from_pretrained("lllyasviel/ControlNet"),
-                "openpose_full": lambda: OpenPoseDetector.from_pretrained("lllyasviel/ControlNet"),
-                "dwpose": lambda: DWposeDetector.from_pretrained("lllyasviel/ControlNet"),
+                "openpose": lambda: OpenposeDetector.from_pretrained("lllyasviel/Annotators"),
+                "openpose_full": lambda: OpenposeDetector.from_pretrained("lllyasviel/Annotators"),
+                #"dwpose": lambda: DWposeDetector(),  # 🔥 修复：不需要 from_pretrained
                 "canny": lambda: CannyDetector(),
-                "hed": lambda: HEDdetector.from_pretrained("lllyasviel/ControlNet"),
-                "lineart": lambda: LineartDetector.from_pretrained("lllyasviel/ControlNet"),
-                "depth": lambda: MidasDetector.from_pretrained("lllyasviel/ControlNet"),
-                "normal": lambda: NormalBaeDetector.from_pretrained("lllyasviel/ControlNet"),
-                "mlsd": lambda: MLSDdetector.from_pretrained("lllyasviel/ControlNet"),
+                "hed": lambda: HEDdetector.from_pretrained("lllyasviel/Annotators"),
+                "lineart": lambda: LineartDetector.from_pretrained("lllyasviel/Annotators"),
+                "depth": lambda: MidasDetector.from_pretrained("lllyasviel/Annotators"),
+                "normal": lambda: NormalBaeDetector.from_pretrained("lllyasviel/Annotators"),
+                "mlsd": lambda: MLSDdetector.from_pretrained("lllyasviel/Annotators"),
             }
 
             if controlnet_type in detectors:
@@ -490,7 +496,7 @@ if __name__ == "__main__":
     parser.add_argument("--image-path", help="图片路径 (detect_pose, 同 image)")
     parser.add_argument("--output-path", help="输出路径 (detect_pose)")
     parser.add_argument("--model-path", help="SD 模型路径 (load_pipeline)")
-    parser.add_argument("--controlnet-type", default="openpose",
+    parser.add_argument("--controlnet-type", default="canny",
                         choices=list(CONTROLNET_TYPES.keys()),
                         help="ControlNet 类型")
     parser.add_argument("--device", choices=["cpu", "cuda"], default="cpu", help="设备")
