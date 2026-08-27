@@ -32,20 +32,9 @@ MarkFlow 是一个轻量级的技能生成框架，让你用 **Markdown** 编写
 | `music_player` | AI 智能歌单生成和音乐管理 | 1.0.0 |
 | `news_aggregator` | RSS 新闻抓取 + AI 摘要生成 | 1.0.0 |
 | `novel_writer` | 使用本地 Ollama 大模型自动写小说 | 1.0.0 |
-| `sd_image_generator` | 使用本地 Stable Diffusion 模型生成图片的技能 | 1.0.0 |
 | `voice_assistant` | 语音合成（TTS）和语音识别（STT）助手 | 1.0.0 |
 
 ## 🎯 代表性技能
-
-### 🎨 SD 图片生成器
-
-使用本地 Stable Diffusion 模型生成图片的技能
-
-```bash
-python -m markflow.cli.commands execute sd_image_generator prompt="a beautiful sunset" model_name="sd-v1-5-tiny.safetensors"
-```
-
-📖 [详细文档](skills/sd_image_generator/README.md)
 
 ### 📖 AI 小说生成器
 
@@ -135,7 +124,6 @@ MarkFlow/
 │   └── utils/                        # 工具函数
 │       └── code_collect.py           # 代码收集/打包
 ├── scripts/                          # 工具脚本
-│   ├── generate_all_girls.py         # 图片批量生成
 │   ├── novel_generator.py            # 小说生成
 │   ├── novel_scheduler.py            # 小说定时任务
 │   ├── generate_skill_readme.py      # 技能 README 生成
@@ -177,11 +165,6 @@ MarkFlow/
 │   │   ├── skill.md              # 技能文档
 │   │   └── output/               # 输出目录
 │   ├── novel_writer/                 # novel_writer_ollama
-│   │   ├── skill.py              # 可执行代码
-│   │   ├── meta.json             # 元数据
-│   │   ├── skill.md              # 技能文档
-│   │   └── output/               # 输出目录
-│   ├── sd_image_generator/                 # SDImageGenerator
 │   │   ├── skill.py              # 可执行代码
 │   │   ├── meta.json             # 元数据
 │   │   ├── skill.md              # 技能文档
