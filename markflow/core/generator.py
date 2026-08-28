@@ -159,16 +159,25 @@ class CodeGenerator:
                     lines.append(f'                except json.JSONDecodeError:')
                     lines.append(f'                    raise ValueError(f"参数 {name} 必须是有效的 JSON")')
         
-        # 设置默认值
+        # 设置默认值（只在参数未提供或为空时设置）
         if optional:
             lines.append('')
             lines.append('        # 设置默认值')
             for inp in optional:
                 name = inp.get('name', '')
                 default = inp.get('default', '')
-                if default:
-                    lines.append(f'        if "{name}" not in kwargs or kwargs["{name}"] is None or kwargs["{name}"] == "":')
-                    lines.append(f'            kwargs["{name}"] = {repr(default)}')
+                if default and default != '-':
+                    # 对于字符串类型，用引号包裹
+                    if isinstance(default, str) and not default.startswith(('"', "'")):
+                        default_repr = repr(default)
+                    else:
+                        default_repr = repr(default)
+                    lines.append(f'        if "{name}" not in kwargs or kwargs["{name}"] is None:')
+                    lines.append(f'            kwargs["{name}"] = {default_repr}')
+                elif default == '-':
+                    # '-' 表示无默认值，使用空字符串
+                    lines.append(f'        if "{name}" not in kwargs or kwargs["{name}"] is None:')
+                    lines.append(f'            kwargs["{name}"] = ""')
         
         lines.append('')
         lines.append('        return True')
@@ -177,9 +186,12 @@ class CodeGenerator:
     
     # ==================== 阶段2：优化步骤方法生成 ====================
     
-    def _generate_steps_methods(self, spec: SkillSpec) -> List[str]:
-        """生成步骤方法（根据步骤类型生成不同实现）"""
+    def _generate_steps_methods(self, spec: SkillSpec, has_steps: bool) -> List[str]:
+        """生成步骤方法"""
         methods = []
+        
+        if not has_steps:
+            return methods
         
         for i, step in enumerate(spec.steps):
             method_name = self._step_to_method_name(step, i)
@@ -220,11 +232,23 @@ class CodeGenerator:
         # 获取数据源
         source = kwargs.get("source") or kwargs.get("file_path") or kwargs.get("data_source")
         if not source:
+            # 尝试从常见参数名获取
+            for key in ["md_file", "file", "path", "input"]:
+                if key in kwargs and kwargs[key]:
+                    source = kwargs[key]
+                    break
+        
+        if not source:
             raise ValueError("未指定数据源")
         
         # 加载数据
-        data = self._load_data(source, **kwargs)
-        kwargs["data"] = data
+        try:
+            data = self._load_data(source, **kwargs)
+            kwargs["data"] = data
+            logger.info(f"数据加载成功: {source}")
+        except Exception as e:
+            logger.error(f"数据加载失败: {e}")
+            raise
         
         return kwargs'''
     
@@ -241,14 +265,25 @@ class CodeGenerator:
         destination = kwargs.get("destination") or kwargs.get("output") or kwargs.get("output_path")
         
         if not destination:
+            for key in ["output_file", "save_path", "path"]:
+                if key in kwargs and kwargs[key]:
+                    destination = kwargs[key]
+                    break
+        
+        if not destination:
             raise ValueError("未指定保存路径")
         
         if data is None:
             raise ValueError("没有数据可保存")
         
         # 保存数据
-        self._save_data(data, destination, **kwargs)
-        kwargs["saved_path"] = destination
+        try:
+            self._save_data(data, destination, **kwargs)
+            kwargs["saved_path"] = destination
+            logger.info(f"数据保存成功: {destination}")
+        except Exception as e:
+            logger.error(f"数据保存失败: {e}")
+            raise
         
         return kwargs'''
     
@@ -263,12 +298,24 @@ class CodeGenerator:
         # 获取要处理的数据
         data = kwargs.get("data") or kwargs.get("input_data")
         if data is None:
+            # 尝试从其他参数获取
+            for key in ["content", "text", "input"]:
+                if key in kwargs and kwargs[key]:
+                    data = kwargs[key]
+                    break
+        
+        if data is None:
             raise ValueError("没有数据可处理")
         
         # 处理数据
-        processed = self._process_data(data, **kwargs)
-        kwargs["processed_data"] = processed
-        kwargs["data"] = processed
+        try:
+            processed = self._process_data(data, **kwargs)
+            kwargs["processed_data"] = processed
+            kwargs["data"] = processed
+            logger.info(f"数据处理完成")
+        except Exception as e:
+            logger.error(f"数据处理失败: {e}")
+            raise
         
         return kwargs'''
     
@@ -283,11 +330,22 @@ class CodeGenerator:
         # 获取要分析的数据
         data = kwargs.get("data") or kwargs.get("input_data")
         if data is None:
+            for key in ["content", "text", "result"]:
+                if key in kwargs and kwargs[key]:
+                    data = kwargs[key]
+                    break
+        
+        if data is None:
             raise ValueError("没有数据可分析")
         
         # 分析数据
-        analysis_result = self._analyze_data(data, **kwargs)
-        kwargs["analysis"] = analysis_result
+        try:
+            analysis_result = self._analyze_data(data, **kwargs)
+            kwargs["analysis"] = analysis_result
+            logger.info(f"数据分析完成: {len(str(analysis_result))} 字符")
+        except Exception as e:
+            logger.error(f"数据分析失败: {e}")
+            raise
         
         return kwargs'''
     
@@ -302,14 +360,24 @@ class CodeGenerator:
         # 获取要验证的数据
         data = kwargs.get("data") or kwargs.get("input_data")
         if data is None:
+            for key in ["content", "text", "result"]:
+                if key in kwargs and kwargs[key]:
+                    data = kwargs[key]
+                    break
+        
+        if data is None:
             raise ValueError("没有数据可验证")
         
         # 验证数据
-        is_valid = self._validate_data(data, **kwargs)
-        if not is_valid:
-            raise ValueError("数据验证失败")
-        
-        kwargs["validated"] = True
+        try:
+            is_valid = self._validate_data(data, **kwargs)
+            if not is_valid:
+                raise ValueError("数据验证失败")
+            kwargs["validated"] = True
+            logger.info(f"数据验证通过")
+        except Exception as e:
+            logger.error(f"数据验证失败: {e}")
+            raise
         
         return kwargs'''
     
@@ -322,11 +390,16 @@ class CodeGenerator:
         logger.info(f"执行步骤: {step}")
         
         # 获取参数
-        params = {k: v for k, v in kwargs.items() if k != "self"}
+        params = {{k: v for k, v in kwargs.items() if k not in ["self"]}}
         
         # 生成结果
-        result = self._generate_result(params, **kwargs)
-        kwargs["generated"] = result
+        try:
+            result = self._generate_result(params, **kwargs)
+            kwargs["generated"] = result
+            logger.info(f"生成完成")
+        except Exception as e:
+            logger.error(f"生成失败: {e}")
+            raise
         
         return kwargs'''
     
@@ -338,40 +411,53 @@ class CodeGenerator:
         """
         logger.info(f"执行步骤: {step}")
         
-        # TODO: 实现具体逻辑
+        # 通用处理逻辑
         # 根据需求: {step}
+        
+        # 获取输入
+        input_data = kwargs.get("data") or kwargs.get("input")
+        
+        # 处理
+        if input_data is not None:
+            # 默认处理：记录数据
+            if isinstance(input_data, (list, dict)):
+                logger.info(f"处理数据: {len(input_data)} 项")
+            else:
+                logger.info(f"处理数据: {type(input_data).__name__}")
+            kwargs["processed"] = input_data
         
         return kwargs'''
     
     # ==================== 阶段3：优化辅助方法 ====================
     
-    def _generate_helper_methods(self, spec: SkillSpec) -> str:
-        """生成辅助方法（增强版）"""
+    def _generate_helper_methods(self, spec: SkillSpec, has_steps: bool) -> str:
+        """生成辅助方法"""
         helpers = []
         
         # 始终包含基础辅助方法
         helpers.append(self._generate_base_helpers())
         
-        # 根据步骤类型添加辅助方法
-        step_text = ' '.join(spec.steps)
-        
-        if any(kw in step_text.lower() for kw in ['读取', 'load', '加载']):
-            helpers.append(self._generate_load_helper())
-        
-        if any(kw in step_text.lower() for kw in ['保存', 'save', '存储', '导出']):
-            helpers.append(self._generate_save_helper())
-        
-        if any(kw in step_text.lower() for kw in ['处理', 'process', '转换']):
-            helpers.append(self._generate_process_helper())
-        
-        if any(kw in step_text.lower() for kw in ['分析', 'analyze', '统计']):
-            helpers.append(self._generate_analyze_helper())
-        
-        if any(kw in step_text.lower() for kw in ['验证', 'validate', '检查']):
-            helpers.append(self._generate_validate_helper())
-        
-        if any(kw in step_text.lower() for kw in ['生成', 'generate', '创建']):
-            helpers.append(self._generate_generate_helper())
+        # 只有有步骤时才生成具体辅助方法
+        if has_steps:
+            step_text = ' '.join(spec.steps)
+            
+            if any(kw in step_text.lower() for kw in ['读取', 'load', '加载']):
+                helpers.append(self._generate_load_helper())
+            
+            if any(kw in step_text.lower() for kw in ['保存', 'save', '存储', '导出']):
+                helpers.append(self._generate_save_helper())
+            
+            if any(kw in step_text.lower() for kw in ['处理', 'process', '转换']):
+                helpers.append(self._generate_process_helper())
+            
+            if any(kw in step_text.lower() for kw in ['分析', 'analyze', '统计']):
+                helpers.append(self._generate_analyze_helper())
+            
+            if any(kw in step_text.lower() for kw in ['验证', 'validate', '检查']):
+                helpers.append(self._generate_validate_helper())
+            
+            if any(kw in step_text.lower() for kw in ['生成', 'generate', '创建']):
+                helpers.append(self._generate_generate_helper())
         
         return '\n'.join(helpers) if helpers else ''
     
@@ -389,7 +475,7 @@ class CodeGenerator:
     
     def _log_step(self, step_name: str, **kwargs):
         """记录步骤日志"""
-        logger.info(f"步骤: {step_name}, 参数: {list(kwargs.keys())}")
+        logger.info(f"步骤: {step_name}")
 '''
     
     def _generate_load_helper(self) -> str:
@@ -397,6 +483,9 @@ class CodeGenerator:
         return '''
     def _load_data(self, source: str, **kwargs) -> Any:
         """加载数据"""
+        import json
+        from pathlib import Path
+        
         if source.startswith(('http://', 'https://')):
             import requests
             response = requests.get(source, timeout=30)
@@ -408,19 +497,24 @@ class CodeGenerator:
                 return response.text
             else:
                 return response.content
-        elif source.endswith(('.csv', '.tsv')):
-            import pandas as pd
-            return pd.read_csv(source)
-        elif source.endswith(('.json')):
-            with open(source, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        elif source.endswith(('.yaml', '.yml')):
-            import yaml
-            with open(source, 'r', encoding='utf-8') as f:
-                return yaml.safe_load(f)
         else:
-            with open(source, 'r', encoding='utf-8') as f:
-                return f.read()
+            path = Path(source)
+            if not path.exists():
+                raise FileNotFoundError(f"文件不存在: {source}")
+            
+            if source.endswith(('.csv', '.tsv')):
+                import pandas as pd
+                return pd.read_csv(source)
+            elif source.endswith('.json'):
+                with open(source, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            elif source.endswith(('.yaml', '.yml')):
+                import yaml
+                with open(source, 'r', encoding='utf-8') as f:
+                    return yaml.safe_load(f)
+            else:
+                with open(source, 'r', encoding='utf-8') as f:
+                    return f.read()
 '''
     
     def _generate_save_helper(self) -> str:
@@ -428,10 +522,9 @@ class CodeGenerator:
         return '''
     def _save_data(self, data: Any, destination: str, **kwargs) -> bool:
         """保存数据"""
-        import os
+        import json
         from pathlib import Path
         
-        # 确保目录存在
         Path(destination).parent.mkdir(parents=True, exist_ok=True)
         
         if destination.endswith('.json'):
@@ -443,7 +536,7 @@ class CodeGenerator:
                 pd.DataFrame(data).to_csv(destination, index=False)
             else:
                 pd.DataFrame([data]).to_csv(destination, index=False)
-        elif destination.endswith('.yaml') or destination.endswith('.yml'):
+        elif destination.endswith(('.yaml', '.yml')):
             import yaml
             with open(destination, 'w', encoding='utf-8') as f:
                 yaml.dump(data, f, allow_unicode=True)
@@ -460,15 +553,16 @@ class CodeGenerator:
         return '''
     def _process_data(self, data: Any, **kwargs) -> Any:
         """处理数据"""
-        # 如果是列表，逐项处理
         if isinstance(data, list):
             return [self._process_item(item, **kwargs) for item in data]
+        elif isinstance(data, dict):
+            return {k: self._process_item(v, **kwargs) for k, v in data.items()}
         else:
             return self._process_item(data, **kwargs)
     
     def _process_item(self, item: Any, **kwargs) -> Any:
         """处理单个数据项"""
-        # TODO: 根据需求自定义处理逻辑
+        # 默认返回原值
         return item
 '''
     
@@ -478,21 +572,23 @@ class CodeGenerator:
     def _analyze_data(self, data: Any, **kwargs) -> Dict:
         """分析数据"""
         result = {
-            "total": 0,
-            "summary": {},
-            "stats": {}
+            "type": type(data).__name__,
+            "size": 0,
+            "summary": {}
         }
         
         if isinstance(data, list):
-            result["total"] = len(data)
+            result["size"] = len(data)
             if data:
-                result["first_item"] = data[0] if isinstance(data[0], dict) else str(data[0])
+                result["first_item"] = data[0] if not isinstance(data[0], (list, dict)) else str(data[0])[:100]
         elif isinstance(data, dict):
-            result["total"] = len(data)
-            result["keys"] = list(data.keys())[:10]
+            result["size"] = len(data)
+            result["keys"] = list(data.keys())[:20]
         elif isinstance(data, str):
-            result["total"] = len(data)
+            result["size"] = len(data)
             result["words"] = len(data.split())
+        elif isinstance(data, (int, float)):
+            result["value"] = data
         
         return result
 '''
@@ -523,6 +619,8 @@ class CodeGenerator:
         return '''
     def _generate_result(self, params: Dict, **kwargs) -> Dict:
         """生成结果"""
+        from datetime import datetime
+        
         return {
             "status": "success",
             "generated_at": datetime.now().isoformat(),
@@ -537,10 +635,13 @@ class CodeGenerator:
         """生成类代码"""
         imports = self._generate_imports(spec.dependencies)
         
-        # 使用增强的方法生成
+        # 判断是否有步骤
+        has_steps = len(spec.steps) > 0
+        
+        # 生成各部分
         validate_method = self._generate_validate_inputs(spec)
-        step_methods = self._generate_steps_methods(spec)
-        helper_methods = self._generate_helper_methods(spec)
+        step_methods = self._generate_steps_methods(spec, has_steps)
+        helper_methods = self._generate_helper_methods(spec, has_steps)
         
         code_lines = []
         
@@ -624,15 +725,18 @@ class CodeGenerator:
         code_lines.append('        try:')
         code_lines.append('            self._validate_inputs(**kwargs)')
         code_lines.append('            ')
-        code_lines.append('            result_data = {}')
         
-        # 生成步骤调用
-        for i, step in enumerate(spec.steps):
-            method_name = self._step_to_method_name(step, i)
-            code_lines.append(f'            # 步骤{i+1}: {step}')
-            code_lines.append(f'            kwargs = self.{method_name}(**kwargs)')
+        if has_steps:
+            code_lines.append('            # 执行步骤')
+            for i, step in enumerate(spec.steps):
+                method_name = self._step_to_method_name(step, i)
+                code_lines.append(f'            kwargs = self.{method_name}(**kwargs)')
+            code_lines.append('            ')
+            code_lines.append('            result_data = kwargs')
+        else:
+            code_lines.append('            # 没有定义步骤，直接返回参数')
+            code_lines.append('            result_data = kwargs')
         
-        code_lines.append('            result_data = kwargs')
         code_lines.append('            ')
         code_lines.append('            result = {')
         code_lines.append('                "status": "success",')
@@ -674,7 +778,7 @@ class CodeGenerator:
         
         return '\n'.join(code_lines)
     
-    # ==================== 其他方法保持不变 ====================
+    # ==================== 其他方法 ====================
     
     def _generate_imports(self, dependencies: List[str]) -> str:
         """生成导入语句"""
