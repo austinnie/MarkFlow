@@ -1,34 +1,48 @@
 # sd_image_generator
 
-> 利用本地 Stable Diffusion 模型，根据文本描述生成高质量图片
+> 使用本地 Stable Diffusion 模型生成图片
 
-## 描述
+**作者**: MarkFlow Team
 
-利用本地 Stable Diffusion 模型，根据文本描述生成高质量图片
+## 概览
 
-## 核心功能
+- **文件数**: 1
+- **类数**: 1
+- **方法数**: 8
+- **函数数**: 1
 
-1. 文本生图 - 根据提示词生成高质量图片
-2. 参数控制 - 支持宽度、高度、步数、引导强度等参数
-3. 批量生成 - 支持一次生成多张图片
-4. 模型切换 - 支持切换不同的 SD 模型
-5. 随机种子 - 支持固定种子或随机种子
+## 支持的功能
 
-## 输入参数
+| 功能 | 说明 |
+|------|------|
+| 🤖 AI 智能处理 | - |
 
-| 参数 | 类型 | 必填 | 默认值 | 描述 |
-|------|------|------|--------|------|
-| `prompt` | string | 是 |  | 图片描述提示词 |
-| `negative_prompt` | string | 否 |  | 负面提示词 |
-| `model_name` | string | 否 | sd-v1-5-tiny.safetensors | 使用的模型文件名 |
-| `width` | integer | 否 | 512 | 生成图片宽度，范围 256-1024 |
-| `height` | integer | 否 | 512 | 生成图片高度，范围 256-1024 |
-| `steps` | integer | 否 | 20 | 采样步数，范围 10-50 |
-| `cfg_scale` | float | 否 | 7.0 | 提示词引导强度，范围 1.0-20.0 |
-| `seed` | integer | 否 | -1 | 随机种子，-1 表示随机 |
-| `output_dir` | string | 否 | ./generated_images | 输出目录 |
-| `batch_size` | integer | 否 | 1 | 一次生成数量，范围 1-4 |
-| `scheduler` | string | 否 | ddim | 采样调度器 |
+## 依赖
+
+```bash
+pip install accelerate
+pip install diffusers
+pip install Pillow
+pip install transformers
+pip install torch
+pip install safetensors
+```
+
+## 参数说明
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `prompt` | string | `` | 图片描述提示词 |
+| `negative_prompt` | string | `` | 负面提示词 |
+| `model_name` | string | `sd-v1-5-tiny.safetensors` | 使用的模型文件名 |
+| `width` | integer | `512` | 生成图片宽度，范围 256-1024 |
+| `height` | integer | `512` | 生成图片高度，范围 256-1024 |
+| `steps` | integer | `20` | 采样步数，范围 10-50 |
+| `cfg_scale` | float | `7.0` | 提示词引导强度，范围 1.0-20.0 |
+| `seed` | integer | `-1` | 随机种子，-1 表示随机 |
+| `output_dir` | string | `./generated_images` | 输出目录 |
+| `batch_size` | integer | `1` | 一次生成数量，范围 1-4 |
+| `scheduler` | string | `ddim` | 采样调度器 |
 
 ## 输出
 
@@ -46,17 +60,16 @@
 python -m markflow.cli.commands execute sd_image_generator [参数]
 ```
 
-## 依赖安装
+### 示例
 
 ```bash
-pip install diffusers
-pip install torch
-pip install transformers
-pip install accelerate
-pip install safetensors
-pip install Pillow
+python -m markflow.cli.commands execute sd_image_generator [参数]
 ```
+
+## 输出位置
+
+生成的输出保存在 `skills/sd_image_generator/output/` 目录下。
 
 ---
 
-*文档生成于 2026-08-28 18:51:14*
+*文档自动生成于 2026-08-28 19:04:23*
