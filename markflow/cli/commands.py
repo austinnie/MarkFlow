@@ -30,6 +30,10 @@ def main():
         epilog="""
 示例:
   markflow build weather.md                    # 从Markdown构建技能
+  markflow build weather.md --quality          # 构建并执行质量检查
+  markflow build weather.md --tests            # 构建并生成单元测试
+  markflow build weather.md --review           # 构建并执行AI代码审查
+  markflow build weather.md --no-format        # 构建时不格式化代码
   markflow list                               # 列出所有技能
   markflow execute WeatherFetcher city=Beijing # 执行技能
   markflow generate -t data -n data_cleaner   # 从模板生成
@@ -43,7 +47,23 @@ def main():
     build_parser.add_argument("file", help="Markdown文件路径")
     build_parser.add_argument("--no-save", action="store_true", help="不保存到文件")
     build_parser.add_argument("--output", "-o", default="./skills", help="输出目录")
-    
+
+    # ========== 新增选项 ==========
+    build_parser.add_argument("--quality", "-q", action="store_true", 
+                              help="执行代码质量检查")
+    build_parser.add_argument("--no-quality", action="store_true", 
+                              help="禁用代码质量检查")
+    build_parser.add_argument("--tests", "-t", action="store_true", 
+                              help="生成单元测试")
+    build_parser.add_argument("--no-tests", action="store_true", 
+                              help="禁用单元测试生成")
+    build_parser.add_argument("--review", "-r", action="store_true", 
+                              help="执行AI代码审查（需要Ollama）")
+    build_parser.add_argument("--no-format", action="store_true", 
+                              help="禁用代码格式化")
+    build_parser.add_argument("--model", "-m", default="qwen2.5:7b", 
+                              help="Ollama模型名称（用于审查）")
+                              
     # execute命令
     exec_parser = subparsers.add_parser("execute", help="执行技能")
     exec_parser.add_argument("skill", help="技能名称")
@@ -112,28 +132,96 @@ def main():
 
 def build_skill(args, executor, console):
     """构建技能"""
+    from pathlib import Path
+    import sys
+    
     file_path = Path(args.file)
     
     if not file_path.exists():
         console.print("[red]错误: 文件不存在: {}[/red]".format(file_path))
         sys.exit(1)
+
+    # ========== 确定构建参数 ==========
+    quality_check = args.quality or not args.no_quality
+    format_code = not args.no_format
+    generate_tests = args.tests or not args.no_tests
+    review = args.review
+    model = args.model
     
     try:
-        result = executor.build_from_file(file_path, save=not args.no_save)
+        # ========== 读取并解析 ==========
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+          
+        # ========== 构建技能 ==========
+        result = executor.build_from_markdown(
+            content, 
+            save=not args.no_save,
+            quality_check=quality_check,
+            format_code=format_code,
+            generate_tests=generate_tests,
+            review=review,
+            model=model
+        )
         
+        # ========== 显示结果 ==========
         console.print("\n[bold green]✅ 技能构建成功![/bold green]")
         console.print("  名称: [cyan]{}[/cyan]".format(result['name']))
         console.print("  类名: [cyan]{}[/cyan]".format(result['class_name']))
         console.print("  版本: [cyan]{}[/cyan]".format(result['metadata'].get('version', '1.0.0')))
         
+        # 显示质量信息
+        if result.get('quality'):
+            quality = result['quality']
+            score = quality.get('score', 0)
+            if score >= 80:
+                score_icon = "🟢"
+            elif score >= 60:
+                score_icon = "🟡"
+            else:
+                score_icon = "🔴"
+            console.print(f"  质量评分: {score_icon} {score}/100")
+            if quality.get('errors'):
+                console.print(f"    ⚠️ 错误: {len(quality['errors'])} 个")
+            if quality.get('warnings'):
+                console.print(f"    ⚠️ 警告: {len(quality['warnings'])} 个")
+        
+        # 显示追溯信息
+        if result.get('trace'):
+            trace = result['trace']
+            coverage = trace.get('coverage', 0) * 100
+            console.print(f"  需求覆盖: {coverage:.1f}% ({trace.get('implemented', 0)}/{trace.get('total_requirements', 0)})")
+        
+        # 显示测试信息
+        if result.get('tests'):
+            console.print("  测试文件: [blue]tests/test_skill.py[/blue]")
+        
+        # 显示依赖
         if result['metadata'].get('dependencies'):
             deps = ", ".join(result['metadata']['dependencies'])
             console.print("  依赖: [yellow]{}[/yellow]".format(deps))
         
+        # 显示保存位置
         if not args.no_save:
-            code_file = executor.registry.storage_dir / "{}.py".format(result['class_name'])
-            console.print("  保存位置: [blue]{}[/blue]".format(code_file))
+            skill_dir = executor.registry.storage_dir / result['class_name'].lower()
+            console.print("  保存位置: [blue]{}[/blue]".format(skill_dir))
         
+        # ========== 显示审查结果 ==========
+        if review and result.get('review'):
+            review_result = result['review']
+            console.print("\n[bold]📋 AI 审查结果:[/bold]")
+            console.print(f"  评分: {review_result.get('score', 0)}/100")
+            if review_result.get('issues'):
+                console.print("  问题:")
+                for issue in review_result['issues'][:5]:
+                    console.print(f"    - {issue}")
+            if review_result.get('suggestions'):
+                console.print("  建议:")
+                for suggestion in review_result['suggestions'][:3]:
+                    console.print(f"    - {suggestion}")
+        
+        # ========== 显示代码预览 ==========
         if RICH_AVAILABLE:
             console.print("\n[bold]代码预览:[/bold]")
             syntax = Syntax(result['code'][:500] + "...", "python", theme="monokai")
@@ -141,6 +229,8 @@ def build_skill(args, executor, console):
         
     except Exception as e:
         console.print("[red]❌ 构建失败: {}[/red]".format(e))
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 

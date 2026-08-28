@@ -7,6 +7,7 @@ from .registry import SkillRegistry
 from .executor import SkillExecutor
 from .quality import CodeQualityChecker
 from .tracer import RequirementTracer
+from .project_builder import ProjectBuilder  # 新增
 
 __all__ = [
     "MarkdownParser",
@@ -16,4 +17,5 @@ __all__ = [
     "SkillExecutor",
     "CodeQualityChecker",
     "RequirementTracer",
+    "ProjectBuilder",  # 新增
 ]

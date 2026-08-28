@@ -12,6 +12,7 @@ from .parser import MarkdownParser, SkillSpec
 
 logger = logging.getLogger(__name__)
 
+from .project_builder import ProjectBuilder  # 新增导入
 
 class SkillExecutor:
     """技能执行器"""
@@ -20,7 +21,76 @@ class SkillExecutor:
         self.registry = registry or SkillRegistry()
         self.parser = MarkdownParser()
         self.generator = CodeGenerator()
-    
+        self.project_builder = ProjectBuilder()  # 新增
+
+    def build_from_markdown(self, markdown_content: str, save: bool = True,
+                            quality_check: bool = True, format_code: bool = True,
+                            generate_tests: bool = True, review: bool = False,
+                            model: str = "qwen2.5:7b") -> Dict[str, Any]:
+        """
+        从Markdown构建技能
+        
+        Args:
+            markdown_content: Markdown内容
+            save: 是否保存到文件
+            quality_check: 是否执行质量检查
+            format_code: 是否格式化代码
+            generate_tests: 是否生成测试
+            review: 是否执行AI审查
+            model: Ollama模型名称
+            
+        Returns:
+            构建结果
+        """
+        import json
+        
+        spec = self.parser.parse(markdown_content)
+        
+        # 生成代码
+        result = self.generator.generate(
+            spec, 
+            quality_check=quality_check,
+            format_code=format_code,
+            generate_tests=generate_tests
+        )
+        
+        # 注册技能
+        self._register_generated_skill(result)
+        
+        # 执行AI审查
+        if review:
+            logger.info("执行AI代码审查...")
+            quality_checker = CodeQualityChecker()
+            review_result = quality_checker.review_code_with_ollama(
+                result['code'], 
+                "python",
+                model=model
+            )
+            result['review'] = review_result
+        
+        # 保存到文件（使用新格式）
+        if save:
+            skill_name = result['class_name'].lower()
+            skill_dir = self.registry.storage_dir / skill_name
+            
+            # 生成完整项目结构
+            project_files = self.project_builder.generate_project(
+                spec,
+                result['code'],
+                result.get('tests', ''),
+                result.get('quality'),
+                result.get('trace')
+            )
+            
+            saved_paths = self.project_builder.save_project(project_files, self.registry.storage_dir)
+            logger.info(f"项目已保存: {skill_dir} ({len(saved_paths)} 个文件)")
+            
+            # 更新结果
+            result['saved_files'] = [str(p) for p in saved_paths]
+            result['project_dir'] = str(skill_dir)
+        
+        return result
+        
     def execute(self, skill_name: str, **kwargs) -> Dict[str, Any]:
         """
         执行技能
@@ -66,47 +136,7 @@ class SkillExecutor:
         # 执行技能
         return self.execute(result['class_name'], **kwargs)
     
-    def build_from_markdown(self, markdown_content: str, save: bool = True, 
-                            quality_check: bool = True, format_code: bool = True) -> Dict[str, Any]:
-        """
-        从Markdown构建技能
-        
-        Args:
-            markdown_content: Markdown内容
-            save: 是否保存到文件
-            quality_check: 是否执行质量检查
-            format_code: 是否格式化代码
-        """
-        spec = self.parser.parse(markdown_content)
-        result = self.generator.generate(spec, quality_check=quality_check, format_code=format_code)
-        
-        self._register_generated_skill(result)
-        
-        if save:
-            # 保存到技能目录（新格式）
-            skill_name = result['class_name'].lower()
-            skill_dir = self.registry.storage_dir / skill_name
-            skill_dir.mkdir(parents=True, exist_ok=True)
-            
-            # 保存 skill.py
-            skill_file = skill_dir / "skill.py"
-            with open(skill_file, 'w', encoding='utf-8') as f:
-                f.write(result['code'])
-            
-            # 保存 meta.json（包含质量信息）
-            metadata = result['metadata']
-            if result.get('quality'):
-                metadata['quality'] = result['quality']
-            if result.get('stats'):
-                metadata['stats'] = result['stats']
-            
-            meta_file = skill_dir / "meta.json"
-            with open(meta_file, 'w', encoding='utf-8') as f:
-                json.dump(metadata, f, ensure_ascii=False, indent=2)
-            
-            logger.info(f"技能已保存: {skill_dir}")
-        
-        return result
+
     
     def build_from_file(self, markdown_path: Path, save: bool = True) -> Dict[str, Any]:
         """
