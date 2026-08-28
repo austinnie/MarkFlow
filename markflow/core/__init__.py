@@ -1,10 +1,12 @@
+# markflow/core/__init__.py
 """核心模块"""
 
 from .parser import MarkdownParser, SkillSpec
 from .generator import CodeGenerator
 from .registry import SkillRegistry
 from .executor import SkillExecutor
-from .quality import CodeQualityChecker  # 新增
+from .quality import CodeQualityChecker
+from .tracer import RequirementTracer
 
 __all__ = [
     "MarkdownParser",
@@ -12,5 +14,6 @@ __all__ = [
     "CodeGenerator",
     "SkillRegistry",
     "SkillExecutor",
-    "CodeQualityChecker",  # 新增
+    "CodeQualityChecker",
+    "RequirementTracer",
 ]

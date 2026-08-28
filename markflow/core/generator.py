@@ -17,57 +17,140 @@ class CodeGenerator:
     def __init__(self):
         self.templates = {}
         self.quality_checker = CodeQualityChecker()  # 新增
-    
-    def generate(self, spec: SkillSpec, quality_check: bool = True, 
-                 format_code: bool = True) -> Dict[str, Any]:
-        """生成技能代码
+
+    def generate_tests(self, spec: SkillSpec, code: str) -> str:
+        """根据技能规格生成单元测试"""
+        class_name = self._generate_class_name(spec.name)
         
-        Args:
-            spec: 技能规格
-            quality_check: 是否执行质量检查
-            format_code: 是否格式化代码
-        """
+        test_lines = []
+        test_lines.append('"""')
+        test_lines.append(f'{spec.name} 单元测试')
+        test_lines.append('"""')
+        test_lines.append('')
+        test_lines.append('import unittest')
+        test_lines.append('import sys')
+        test_lines.append('from pathlib import Path')
+        test_lines.append('')
+        test_lines.append('# 添加项目根目录到路径')
+        test_lines.append('sys.path.insert(0, str(Path(__file__).parent.parent))')
+        test_lines.append('')
+        test_lines.append(f'from skills.{spec.name}.skill import {class_name}')
+        test_lines.append('')
+        test_lines.append('')
+        test_lines.append(f'class Test{class_name}(unittest.TestCase):')
+        test_lines.append('    """')
+        test_lines.append(f'    {class_name} 测试类')
+        test_lines.append('    """')
+        test_lines.append('')
+        test_lines.append('    def setUp(self):')
+        test_lines.append('        """测试前准备"""')
+        test_lines.append(f'        self.skill = {class_name}()')
+        test_lines.append('')
+        
+        # 根据输入参数生成测试
+        if spec.inputs:
+            test_lines.append('    def test_execute_with_valid_params(self):')
+            test_lines.append('        """测试正常执行"""')
+            
+            params = []
+            for inp in spec.inputs:
+                name = inp.get('name', '')
+                default = inp.get('default', '')
+                if default:
+                    params.append(f'{name}={repr(default)}')
+                elif inp.get('required', False):
+                    params.append(f'{name}="test_{name}"')
+                else:
+                    params.append(f'{name}=""')
+            
+            params_str = ', '.join(params)
+            test_lines.append(f'        result = self.skill.execute({params_str})')
+            test_lines.append('        self.assertEqual(result.get("status"), "success")')
+            test_lines.append('        self.assertIn("result", result)')
+            test_lines.append('')
+            
+            # 必填参数测试
+            required = [inp for inp in spec.inputs if inp.get('required', False)]
+            if required:
+                test_lines.append('    def test_execute_missing_required_params(self):')
+                test_lines.append('        """测试缺少必填参数"""')
+                for inp in required[:1]:
+                    test_lines.append(f'        with self.assertRaises(ValueError):')
+                    test_lines.append(f'            self.skill.execute({inp["name"]}="")')
+                test_lines.append('')
+        
+        # 元数据测试
+        test_lines.append('    def test_skill_metadata(self):')
+        test_lines.append('        """测试技能元数据"""')
+        test_lines.append(f'        self.assertEqual(self.skill.name, "{spec.name}")')
+        test_lines.append('        self.assertIsInstance(self.skill.version, str)')
+        test_lines.append('')
+        
+        test_lines.append('')
+        test_lines.append('if __name__ == "__main__":')
+        test_lines.append('    unittest.main()')
+        
+        return '\n'.join(test_lines)
+        
+    def generate(self, spec: SkillSpec, quality_check: bool = True, 
+                 format_code: bool = True, generate_tests: bool = True) -> Dict[str, Any]:
+        """生成技能代码"""
+        from .tracer import RequirementTracer  # 新增导入
+        
         class_name = self._generate_class_name(spec.name)
         code = self._generate_class_code(spec, class_name)
         
-        # 新增：质量检查
+        # 质量检查
         quality_result = None
         if quality_check:
             logger.info("执行代码质量检查...")
             quality_result = self.quality_checker.validate_all(code, "python")
-            
-            if quality_result.get("errors"):
-                logger.warning(f"代码质量问题: {quality_result['errors']}")
             if quality_result.get("score", 0) < 60:
                 logger.warning(f"质量评分较低: {quality_result['score']}/100")
             else:
                 logger.info(f"质量评分: {quality_result['score']}/100")
         
-        # 新增：格式化
+        # 格式化
         if format_code:
             logger.info("格式化代码...")
             code = self.quality_checker.format_code(code, "python")
+        
+        # 生成测试
+        tests = ""
+        if generate_tests:
+            logger.info("生成单元测试...")
+            tests = self.generate_tests(spec, code)
+        
+        # 需求追溯
+        tracer = RequirementTracer()
+        trace_result = tracer.trace(spec, code)
         
         metadata = self._generate_metadata(spec)
         if quality_result:
             metadata['quality'] = {
                 'score': quality_result.get('score', 0),
                 'passed': quality_result.get('passed', False),
-                'checks_count': len(quality_result.get('checks', [])),
                 'errors_count': len(quality_result.get('errors', [])),
                 'warnings_count': len(quality_result.get('warnings', []))
             }
+        if trace_result:
+            metadata['trace'] = {
+                'coverage': trace_result['coverage'],
+                'total_requirements': trace_result['total_requirements'],
+                'implemented': trace_result['implemented']
+            }
         
-        # 新增：代码统计
         stats = self.quality_checker.analyze_code_stats(code, "python")
         
         return {
             'name': spec.name,
             'class_name': class_name,
             'code': code,
+            'tests': tests,
             'metadata': metadata,
-            'quality': quality_result,  # 新增
-            'stats': stats  # 新增
+            'quality': quality_result,
+            'stats': stats,
+            'trace': trace_result
         }
     
     def _generate_class_name(self, name: str) -> str:
