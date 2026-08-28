@@ -1,9 +1,8 @@
 """
 sd_image_generator - 利用本地 Stable Diffusion 模型，根据文本描述生成高质量图片
 
-
 输入参数:
-  - prompt (string): 图片描述提示词
+  - prompt (string): 图片描述提示词 (必填)
   - negative_prompt (string): 负面提示词
   - model_name (string): 使用的模型文件名
   - width (integer): 生成图片宽度，范围 256-1024
@@ -21,59 +20,58 @@ sd_image_generator - 利用本地 Stable Diffusion 模型，根据文本描述�
   - model_used: 使用的模型名称
   - generation_time: 生成耗时(秒)
   - generated_at: 生成时间
-
-执行步骤:
-  1. 验证输入参数
-  2. 检查模型文件是否存在
-  3. 加载选定的模型
-  4. 设置随机种子
-  5. 执行图片生成
-  6. 保存生成的图片
-  7. 返回生成结果信息
 """
 
-# import safetensors  # 可选依赖
-# import diffusers  # 可选依赖
 import sys
-import time
-import re
-# import torch  # 可选依赖
-import json
 import os
-# import accelerate  # 可选依赖
-# import transformers  # 可选依赖
-import random
-# import Pillow  # 可选依赖
-
-import logging
-from typing import Dict, Any, Optional, List
-from pathlib import Path
-from datetime import datetime
+import time
 import json
+import random
+import logging
+from pathlib import Path
+from typing import Dict, Any, Optional, List
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# 导入 SD 相关库（带降级处理）
+try:
+    import torch
+    from diffusers import StableDiffusionPipeline
+    from PIL import Image
+    DIFFUSERS_AVAILABLE = True
+except ImportError as e:
+    DIFFUSERS_AVAILABLE = False
+    logger.warning(f"diffusers 未安装: {e}")
 
 
 class SdImageGenerator:
     """
     利用本地 Stable Diffusion 模型，根据文本描述生成高质量图片
-    
-    执行技能功能
     """
-    
+
     def __init__(self, config: Dict[str, Any] = None):
-        """
-        初始化技能
-        
-        Args:
-            config: 配置参数字典
-        """
+        """初始化技能"""
         self.config = config or {}
         self.name = "sd_image_generator"
         self.version = "1.0.0"
+
+        # 模型配置
+        self.models_dir = Path("D:/SD_OpenVINO/models/sd-v1-5")
+        self.default_model = "aiiiiii01_v10.safetensors"
+        self.device = "cuda" if torch.cuda.is_available() else "cpu" if DIFFUSERS_AVAILABLE else "cpu"
+
+        self.pipeline = None
+        self.current_model = None
+
         self._setup_logging()
         self._setup_config()
-    
+
+        logger.info(f"SdImageGenerator 初始化完成")
+        logger.info(f"  模型目录: {self.models_dir}")
+        logger.info(f"  默认模型: {self.default_model}")
+        logger.info(f"  设备: {self.device}")
+
     def _setup_logging(self):
         """设置日志"""
         log_level = self.config.get('log_level', 'INFO')
@@ -81,411 +79,264 @@ class SdImageGenerator:
             level=getattr(logging, log_level.upper()),
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
-    
+
     def _setup_config(self):
         """设置配置"""
-        defaults = {}
+        defaults = {
+            'output_dir': './skills/sd_image_generator/output/images',
+            'default_model': self.default_model,
+            'default_width': 512,
+            'default_height': 768,
+            'default_steps': 25,
+            'default_cfg_scale': 7.5,
+            'default_seed': -1,
+            'default_batch_size': 1,
+            'models_dir': str(self.models_dir),
+        }
         for key, value in defaults.items():
             if key not in self.config:
                 self.config[key] = value
-    
+
+    def _find_model(self, model_name: str) -> Optional[Path]:
+        """查找模型文件"""
+        if not model_name:
+            model_name = self.config.get('default_model', self.default_model)
+
+        logger.info(f"🔍 查找模型: '{model_name}'")
+
+        models_dir = Path(self.config.get('models_dir', str(self.models_dir)))
+        model_path = models_dir / model_name
+
+        if model_path.exists():
+            logger.info(f"✅ 找到: {model_path}")
+            return model_path
+
+        # 尝试子目录
+        subdirs = ['sd-v1-5', 'sdxl']
+        for subdir in subdirs:
+            sub_path = models_dir / subdir / model_name
+            if sub_path.exists():
+                logger.info(f"✅ 找到: {sub_path}")
+                return sub_path
+
+        logger.error(f"❌ 未找到模型: '{model_name}'")
+        return None
+
+    def _load_model(self, model_name: str) -> bool:
+        """加载 SD 模型"""
+        if not DIFFUSERS_AVAILABLE:
+            logger.error("diffusers 未安装，请运行: pip install diffusers torch Pillow")
+            return False
+
+        model_path = self._find_model(model_name)
+        if not model_path:
+            return False
+
+        try:
+            logger.info(f"加载模型: {model_path}")
+
+            self.pipeline = StableDiffusionPipeline.from_single_file(
+                str(model_path),
+                torch_dtype=torch.float16 if self.device == 'cuda' else torch.float32,
+                safety_checker=None,
+                requires_safety_checker=False
+            )
+
+            self.pipeline.to(self.device)
+
+            if self.device == 'cuda':
+                self.pipeline.enable_attention_slicing()
+
+            self.current_model = model_name
+            logger.info(f"✅ 模型加载成功: {model_name}")
+            return True
+
+        except Exception as e:
+            logger.error(f"加载模型失败: {e}")
+            return False
+
     def _validate_inputs(self, **kwargs) -> bool:
-        """
-        验证输入参数
-        
-        Args:
-            **kwargs: 输入参数
-            
-        Returns:
-            验证是否通过
-        """
-        # 检查必填参数
-        required_params = ["prompt"]
-        for param in required_params:
-            if param not in kwargs or kwargs[param] is None or kwargs[param] == "":
-                raise ValueError(f"缺少必需参数: {param}")
+        """验证输入参数"""
+        if 'prompt' not in kwargs or not kwargs['prompt']:
+            raise ValueError("prompt 是必填参数")
 
-        # 类型验证
-        if "width" in kwargs and kwargs["width"] is not None:
-            try:
-                kwargs["width"] = int(kwargs["width"])
-            except (ValueError, TypeError):
-                raise ValueError(f"参数 width 必须是整数")
-        if "height" in kwargs and kwargs["height"] is not None:
-            try:
-                kwargs["height"] = int(kwargs["height"])
-            except (ValueError, TypeError):
-                raise ValueError(f"参数 height 必须是整数")
-        if "steps" in kwargs and kwargs["steps"] is not None:
-            try:
-                kwargs["steps"] = int(kwargs["steps"])
-            except (ValueError, TypeError):
-                raise ValueError(f"参数 steps 必须是整数")
-        if "cfg_scale" in kwargs and kwargs["cfg_scale"] is not None:
-            try:
-                kwargs["cfg_scale"] = float(kwargs["cfg_scale"])
-            except (ValueError, TypeError):
-                raise ValueError(f"参数 cfg_scale 必须是数字")
-        if "seed" in kwargs and kwargs["seed"] is not None:
-            try:
-                kwargs["seed"] = int(kwargs["seed"])
-            except (ValueError, TypeError):
-                raise ValueError(f"参数 seed 必须是整数")
-        if "batch_size" in kwargs and kwargs["batch_size"] is not None:
-            try:
-                kwargs["batch_size"] = int(kwargs["batch_size"])
-            except (ValueError, TypeError):
-                raise ValueError(f"参数 batch_size 必须是整数")
+        width = kwargs.get('width', self.config.get('default_width', 512))
+        height = kwargs.get('height', self.config.get('default_height', 768))
+        steps = kwargs.get('steps', self.config.get('default_steps', 25))
+        cfg_scale = kwargs.get('cfg_scale', self.config.get('default_cfg_scale', 7.5))
+        batch_size = kwargs.get('batch_size', self.config.get('default_batch_size', 1))
 
-        # 设置默认值
-        if "model_name" not in kwargs or kwargs["model_name"] is None:
-            kwargs["model_name"] = 'sd-v1-5-tiny.safetensors'
-        if "width" not in kwargs or kwargs["width"] is None:
-            kwargs["width"] = '512'
-        if "height" not in kwargs or kwargs["height"] is None:
-            kwargs["height"] = '512'
-        if "steps" not in kwargs or kwargs["steps"] is None:
-            kwargs["steps"] = '20'
-        if "cfg_scale" not in kwargs or kwargs["cfg_scale"] is None:
-            kwargs["cfg_scale"] = '7.0'
-        if "seed" not in kwargs or kwargs["seed"] is None:
-            kwargs["seed"] = '-1'
-        if "output_dir" not in kwargs or kwargs["output_dir"] is None:
-            kwargs["output_dir"] = './generated_images'
-        if "batch_size" not in kwargs or kwargs["batch_size"] is None:
-            kwargs["batch_size"] = '1'
-        if "scheduler" not in kwargs or kwargs["scheduler"] is None:
-            kwargs["scheduler"] = 'ddim'
+        if width < 256 or width > 1024:
+            raise ValueError(f"width 必须在 256-1024 之间，当前值: {width}")
+        if height < 256 or height > 1024:
+            raise ValueError(f"height 必须在 256-1024 之间，当前值: {height}")
+        if steps < 10 or steps > 50:
+            raise ValueError(f"steps 必须在 10-50 之间，当前值: {steps}")
+        if cfg_scale < 1.0 or cfg_scale > 20.0:
+            raise ValueError(f"cfg_scale 必须在 1.0-20.0 之间，当前值: {cfg_scale}")
+        if batch_size < 1 or batch_size > 4:
+            raise ValueError(f"batch_size 必须在 1-4 之间，当前值: {batch_size}")
 
         return True
-    
+
     def execute(self, **kwargs) -> Dict[str, Any]:
-        """
-        执行技能
-        
-        Args:
-            **kwargs: 输入参数
-            
-        Returns:
-            执行结果
-        """
+        """执行技能"""
+        start_time = time.time()
         logger.info(f"执行技能: {self.name} (v{self.version})")
-        
+
         try:
             self._validate_inputs(**kwargs)
-            
-            # 执行步骤
-            kwargs = self._step_1(**kwargs)
-            kwargs = self._step_2(**kwargs)
-            kwargs = self._step_3(**kwargs)
-            kwargs = self._step_4(**kwargs)
-            kwargs = self._step_5(**kwargs)
-            kwargs = self._step_6(**kwargs)
-            kwargs = self._step_7(**kwargs)
-            
-            result_data = kwargs
-            
-            result = {
+
+            prompt = kwargs.get('prompt')
+            negative_prompt = kwargs.get('negative_prompt', '')
+
+            # 获取模型名称
+            model_name = kwargs.get('model_name') or self.config.get('default_model', self.default_model)
+
+            width = kwargs.get('width', self.config.get('default_width', 512))
+            height = kwargs.get('height', self.config.get('default_height', 768))
+            steps = kwargs.get('steps', self.config.get('default_steps', 25))
+            cfg_scale = kwargs.get('cfg_scale', self.config.get('default_cfg_scale', 7.5))
+            batch_size = kwargs.get('batch_size', self.config.get('default_batch_size', 1))
+
+            output_dir = kwargs.get('output_dir', self.config.get('output_dir', './skills/sd_image_generator/output/images'))
+            output_dir = Path(output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            # 对齐到 8 的倍数
+            width = (width // 8) * 8
+            height = (height // 8) * 8
+
+            # 加载模型
+            if self.pipeline is None or self.current_model != model_name:
+                if not self._load_model(model_name):
+                    return {"status": "error", "error": f"无法加载模型: {model_name}"}
+
+            # 设置随机种子
+            seed = kwargs.get('seed', -1)
+            if isinstance(seed, str):
+                try:
+                    seed = int(seed)
+                except:
+                    seed = -1
+
+            if seed == -1:
+                seed = random.randint(0, 2**32 - 1)
+            generator = torch.Generator(device=self.device).manual_seed(seed)
+
+            logger.info(f"生成参数:")
+            logger.info(f"  提示词: {prompt[:50]}...")
+            logger.info(f"  模型: {model_name}")
+            logger.info(f"  尺寸: {width}x{height}")
+            logger.info(f"  步数: {steps}")
+            logger.info(f"  种子: {seed}")
+            logger.info(f"  批量: {batch_size}")
+
+            # 执行生成
+            result = self.pipeline(
+                prompt=prompt,
+                negative_prompt=negative_prompt if negative_prompt else None,
+                width=width,
+                height=height,
+                num_inference_steps=steps,
+                guidance_scale=cfg_scale,
+                generator=generator,
+                num_images_per_prompt=batch_size
+            )
+
+            # 保存图片
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            image_paths = []
+
+            for i, image in enumerate(result.images):
+                filename = f"image_{timestamp}_{seed}_{i}.png"
+                filepath = output_dir / filename
+                image.save(filepath)
+                image_paths.append(str(filepath))
+                logger.info(f"  ✅ 图片 {i+1}: {filepath}")
+
+            generation_time = time.time() - start_time
+
+            return {
                 "status": "success",
-                "result": result_data,
+                "result": {
+                    "image_paths": image_paths,
+                    "parameters": {
+                        "prompt": prompt,
+                        "negative_prompt": negative_prompt,
+                        "model": model_name,
+                        "width": width,
+                        "height": height,
+                        "steps": steps,
+                        "cfg_scale": cfg_scale,
+                        "seed": seed,
+                        "batch_size": batch_size,
+                        "output_dir": str(output_dir)
+                    },
+                    "model_used": model_name,
+                    "generation_time": f"{generation_time:.2f}s",
+                    "generated_at": datetime.now().isoformat()
+                },
                 "metadata": {
                     "skill": self.name,
                     "version": self.version,
                     "executed_at": datetime.now().isoformat()
                 }
             }
-            
-            logger.info(f"技能执行成功: {self.name}")
-            return result
-            
+
         except Exception as e:
-            logger.error(f"技能执行失败: {e}")
+            logger.error(f"执行失败: {e}")
             return {
                 "status": "error",
                 "error": str(e),
                 "skill": self.name,
                 "timestamp": datetime.now().isoformat()
             }
-    
-    def _step_1(self, **kwargs):
-            """
-            验证输入参数
-            """
-            logger.info(f"执行步骤: 验证输入参数")
-            
-            # 获取要验证的数据
-            data = kwargs.get("data") or kwargs.get("input_data")
-            if data is None:
-                for key in ["content", "text", "result"]:
-                    if key in kwargs and kwargs[key]:
-                        data = kwargs[key]
-                        break
-            
-            if data is None:
-                raise ValueError("没有数据可验证")
-            
-            # 验证数据
-            try:
-                is_valid = self._validate_data(data, **kwargs)
-                if not is_valid:
-                    raise ValueError("数据验证失败")
-                kwargs["validated"] = True
-                logger.info(f"数据验证通过")
-            except Exception as e:
-                logger.error(f"数据验证失败: {e}")
-                raise
-            
-            return kwargs
-
-    def _step_2(self, **kwargs):
-            """
-            检查模型文件是否存在
-            """
-            logger.info(f"执行步骤: 检查模型文件是否存在")
-            
-            # 获取要验证的数据
-            data = kwargs.get("data") or kwargs.get("input_data")
-            if data is None:
-                for key in ["content", "text", "result"]:
-                    if key in kwargs and kwargs[key]:
-                        data = kwargs[key]
-                        break
-            
-            if data is None:
-                raise ValueError("没有数据可验证")
-            
-            # 验证数据
-            try:
-                is_valid = self._validate_data(data, **kwargs)
-                if not is_valid:
-                    raise ValueError("数据验证失败")
-                kwargs["validated"] = True
-                logger.info(f"数据验证通过")
-            except Exception as e:
-                logger.error(f"数据验证失败: {e}")
-                raise
-            
-            return kwargs
-
-    def _step_3(self, **kwargs):
-            """
-            加载选定的模型
-            """
-            logger.info(f"执行步骤: 加载选定的模型")
-            
-            # 获取数据源
-            source = kwargs.get("source") or kwargs.get("file_path") or kwargs.get("data_source")
-            if not source:
-                for key in ["md_file", "file", "path", "input"]:
-                    if key in kwargs and kwargs[key]:
-                        source = kwargs[key]
-                        break
-            
-            if not source:
-                raise ValueError("未指定数据源")
-            
-            try:
-                data = self._load_data(source, **kwargs)
-                kwargs["data"] = data
-                logger.info(f"数据加载成功: {source}")  # ✅ 改这里
-            except Exception as e:
-                logger.error(f"数据加载失败: {e}")
-                raise
-            
-            return kwargs
-
-    def _step_4(self, **kwargs):
-            """
-            设置随机种子
-            """
-            logger.info(f"执行步骤: 设置随机种子")
-            
-            # 通用处理逻辑
-            input_data = kwargs.get("data") or kwargs.get("input")
-            
-            if input_data is not None:
-                if isinstance(input_data, (list, dict)):
-                    logger.info(f"处理数据: {len(input_data)} 项")
-                else:
-                    logger.info(f"处理数据: {type(input_data).__name__}")
-                kwargs["processed"] = input_data
-            
-            return kwargs
-
-    def _step_5(self, **kwargs):
-            """
-            执行图片生成
-            """
-            logger.info(f"执行步骤: 执行图片生成")
-            
-            params = {k: v for k, v in kwargs.items() if k not in ["self"]}
-            
-            try:
-                result = self._generate_result(params, **kwargs)
-                kwargs["generated"] = result
-                logger.info(f"生成完成")
-            except Exception as e:
-                logger.error(f"生成失败: {e}")
-                raise
-            
-            return kwargs
-
-    def _step_6(self, **kwargs):
-            """
-            保存生成的图片
-            """
-            logger.info(f"执行步骤: 保存生成的图片")
-            
-            data = kwargs.get("data") or kwargs.get("result")
-            destination = kwargs.get("destination") or kwargs.get("output") or kwargs.get("output_path")
-            
-            if not destination:
-                for key in ["output_file", "save_path", "path"]:
-                    if key in kwargs and kwargs[key]:
-                        destination = kwargs[key]
-                        break
-            
-            if not destination:
-                raise ValueError("未指定保存路径")
-            
-            if data is None:
-                raise ValueError("没有数据可保存")
-            
-            try:
-                self._save_data(data, destination, **kwargs)
-                kwargs["saved_path"] = destination
-                logger.info(f"数据保存成功: {destination}")  # ✅ 改这里
-            except Exception as e:
-                logger.error(f"数据保存失败: {e}")
-                raise
-            
-            return kwargs
-
-    def _step_7(self, **kwargs):
-            """
-            返回生成结果信息
-            """
-            logger.info(f"执行步骤: 返回生成结果信息")
-            
-            params = {k: v for k, v in kwargs.items() if k not in ["self"]}
-            
-            try:
-                result = self._generate_result(params, **kwargs)
-                kwargs["generated"] = result
-                logger.info(f"生成完成")
-            except Exception as e:
-                logger.error(f"生成失败: {e}")
-                raise
-            
-            return kwargs
-
-
-    def _handle_error(self, error: Exception, context: str = "") -> Dict:
-        """处理错误"""
-        logger.error(f"{context}: {error}")
-        return {
-            "status": "error",
-            "error": str(error),
-            "context": context
-        }
-    
-    def _log_step(self, step_name: str, **kwargs):
-        """记录步骤日志"""
-        logger.info(f"步骤: {step_name}")
-
-
-    def _load_data(self, source: str, **kwargs) -> Any:
-        """加载数据"""
-        import json
-        from pathlib import Path
-        
-        if source.startswith(('http://', 'https://')):
-            import requests
-            response = requests.get(source, timeout=30)
-            response.raise_for_status()
-            content_type = response.headers.get('content-type', '')
-            if 'json' in content_type:
-                return response.json()
-            elif 'text' in content_type:
-                return response.text
-            else:
-                return response.content
-        else:
-            path = Path(source)
-            if not path.exists():
-                raise FileNotFoundError(f"文件不存在: {source}")
-            
-            if source.endswith(('.csv', '.tsv')):
-                import pandas as pd
-                return pd.read_csv(source)
-            elif source.endswith('.json'):
-                with open(source, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            elif source.endswith(('.yaml', '.yml')):
-                import yaml
-                with open(source, 'r', encoding='utf-8') as f:
-                    return yaml.safe_load(f)
-            else:
-                with open(source, 'r', encoding='utf-8') as f:
-                    return f.read()
-
-
-    def _save_data(self, data: Any, destination: str, **kwargs) -> bool:
-        """保存数据"""
-        import json
-        from pathlib import Path
-        
-        Path(destination).parent.mkdir(parents=True, exist_ok=True)
-        
-        if destination.endswith('.json'):
-            with open(destination, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-        elif destination.endswith('.csv'):
-            import pandas as pd
-            if isinstance(data, (list, dict)):
-                pd.DataFrame(data).to_csv(destination, index=False)
-            else:
-                pd.DataFrame([data]).to_csv(destination, index=False)
-        elif destination.endswith(('.yaml', '.yml')):
-            import yaml
-            with open(destination, 'w', encoding='utf-8') as f:
-                yaml.dump(data, f, allow_unicode=True)
-        else:
-            with open(destination, 'w', encoding='utf-8') as f:
-                f.write(str(data))
-        
-        logger.info(f"数据已保存: {destination}")
-        return True
-
-
-    def _validate_data(self, data: Any, **kwargs) -> bool:
-        """验证数据"""
-        if data is None:
-            logger.warning("数据为空")
-            return False
-        
-        if isinstance(data, (list, dict)) and not data:
-            logger.warning("数据为空容器")
-            return False
-        
-        if isinstance(data, str) and not data.strip():
-            logger.warning("数据为空字符串")
-            return False
-        
-        logger.info(f"数据验证通过: 类型={type(data).__name__}")
-        return True
-
-
-    def _generate_result(self, params: Dict, **kwargs) -> Dict:
-        """生成结果"""
-        from datetime import datetime
-        
-        return {
-            "status": "success",
-            "generated_at": datetime.now().isoformat(),
-            "params": params,
-            "result": params
-        }
 
     def __repr__(self):
         return f"<SdImageGenerator(name={self.name}, version={self.version})>"
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="SD 图片生成器")
+    parser.add_argument("--prompt", "-p", required=True, help="提示词")
+    parser.add_argument("--negative", "-n", default="", help="负面提示词")
+    parser.add_argument("--model", "-m", default=None, help="模型名称")
+    parser.add_argument("--width", "-W", type=int, default=512, help="宽度")
+    parser.add_argument("--height", "-H", type=int, default=768, help="高度")
+    parser.add_argument("--steps", "-s", type=int, default=25, help="步数")
+    parser.add_argument("--cfg", "-c", type=float, default=7.5, help="CFG尺度")
+    parser.add_argument("--seed", type=int, default=-1, help="随机种子")
+    parser.add_argument("--output", "-o", default="./generated_images", help="输出目录")
+    parser.add_argument("--batch", "-b", type=int, default=1, help="批量数量")
+
+    args = parser.parse_args()
+
+    skill = SdImageGenerator()
+
+    execute_kwargs = {
+        "prompt": args.prompt,
+        "negative_prompt": args.negative,
+        "width": args.width,
+        "height": args.height,
+        "seed": args.seed,
+        "output_dir": args.output,
+        "batch_size": args.batch,
+        "steps": args.steps,
+        "cfg_scale": args.cfg,
+    }
+
+    if args.model:
+        execute_kwargs["model_name"] = args.model
+
+    result = skill.execute(**execute_kwargs)
+
+    if result['status'] == 'success':
+        data = result['result']
+        print(f"\n✅ 生成成功!")
+        print(f"  📁 图片: {data['image_paths']}")
+        print(f"  ⏱️  耗时: {data['generation_time']}")
+    else:
+        print(f"\n❌ 生成失败: {result.get('error', '未知错误')}")
