@@ -44,29 +44,49 @@ except ImportError as e:
     DIFFUSERS_AVAILABLE = False
     logger.warning(f"diffusers 未安装: {e}")
 
+# 文件顶部添加导入
+from markflow.utils.model_config import get_model_config
 
 class SdImageGenerator:
     """
     利用本地 Stable Diffusion 模型，根据文本描述生成高质量图片
     """
 
+
+
+    # 在 __init__ 中
     def __init__(self, config: Dict[str, Any] = None):
         """初始化技能"""
         self.config = config or {}
         self.name = "sd_image_generator"
         self.version = "1.0.0"
 
-        # 模型配置
-        self.models_dir = Path("D:/SD_OpenVINO/models/sd-v1-5")
-        self.default_model = "aiiiiii01_v10.safetensors"
+        # ✅ 从统一配置获取模型路径
+        try:
+            model_cfg = get_model_config()
+            model_path = model_cfg.get('model_path')
+            if model_path:
+                self.models_dir = Path(model_path).parent
+                self.default_model = Path(model_path).name
+            else:
+                # 回退：使用项目相对路径
+                project_root = Path(__file__).parent.parent.parent
+                self.models_dir = project_root / "models" / "sd-v1-5"
+                self.default_model = "aiiiiiii01_v10.safetensors"
+        except Exception as e:
+            logger.warning(f"加载模型配置失败: {e}，使用默认路径")
+            project_root = Path(__file__).parent.parent.parent
+            self.models_dir = project_root / "models" / "sd-v1-5"
+            self.default_model = "aiiiiiii01_v10.safetensors"
+        
         self.device = "cuda" if torch.cuda.is_available() else "cpu" if DIFFUSERS_AVAILABLE else "cpu"
-
+        
         self.pipeline = None
         self.current_model = None
-
+        
         self._setup_logging()
         self._setup_config()
-
+        
         logger.info(f"SdImageGenerator 初始化完成")
         logger.info(f"  模型目录: {self.models_dir}")
         logger.info(f"  默认模型: {self.default_model}")
@@ -98,19 +118,27 @@ class SdImageGenerator:
                 self.config[key] = value
 
     def _find_model(self, model_name: str) -> Optional[Path]:
-        """查找模型文件"""
+        """查找模型文件，自动尝试添加 .safetensors 后缀"""
         if not model_name:
             model_name = self.config.get('default_model', self.default_model)
-
+        
         logger.info(f"🔍 查找模型: '{model_name}'")
-
+        
         models_dir = Path(self.config.get('models_dir', str(self.models_dir)))
+        
+        # 直接查找
         model_path = models_dir / model_name
-
         if model_path.exists():
             logger.info(f"✅ 找到: {model_path}")
             return model_path
-
+        
+        # 如果没找到且没有后缀，尝试添加 .safetensors
+        if not model_name.endswith('.safetensors'):
+            model_path = models_dir / (model_name + '.safetensors')
+            if model_path.exists():
+                logger.info(f"✅ 找到: {model_path}")
+                return model_path
+        
         # 尝试子目录
         subdirs = ['sd-v1-5', 'sdxl']
         for subdir in subdirs:
@@ -118,10 +146,17 @@ class SdImageGenerator:
             if sub_path.exists():
                 logger.info(f"✅ 找到: {sub_path}")
                 return sub_path
-
+            
+            # 子目录也尝试加后缀
+            if not model_name.endswith('.safetensors'):
+                sub_path = models_dir / subdir / (model_name + '.safetensors')
+                if sub_path.exists():
+                    logger.info(f"✅ 找到: {sub_path}")
+                    return sub_path
+        
         logger.error(f"❌ 未找到模型: '{model_name}'")
         return None
-
+    
     def _load_model(self, model_name: str) -> bool:
         """加载 SD 模型"""
         if not DIFFUSERS_AVAILABLE:
