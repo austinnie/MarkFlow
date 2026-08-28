@@ -4,7 +4,11 @@
 
 from typing import Dict, Any, List, Optional
 from .parser import SkillSpec
+from .quality import CodeQualityChecker  # 新增导入
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class CodeGenerator:
@@ -12,18 +16,58 @@ class CodeGenerator:
     
     def __init__(self):
         self.templates = {}
+        self.quality_checker = CodeQualityChecker()  # 新增
     
-    def generate(self, spec: SkillSpec) -> Dict[str, Any]:
-        """生成技能代码"""
+    def generate(self, spec: SkillSpec, quality_check: bool = True, 
+                 format_code: bool = True) -> Dict[str, Any]:
+        """生成技能代码
+        
+        Args:
+            spec: 技能规格
+            quality_check: 是否执行质量检查
+            format_code: 是否格式化代码
+        """
         class_name = self._generate_class_name(spec.name)
         code = self._generate_class_code(spec, class_name)
+        
+        # 新增：质量检查
+        quality_result = None
+        if quality_check:
+            logger.info("执行代码质量检查...")
+            quality_result = self.quality_checker.validate_all(code, "python")
+            
+            if quality_result.get("errors"):
+                logger.warning(f"代码质量问题: {quality_result['errors']}")
+            if quality_result.get("score", 0) < 60:
+                logger.warning(f"质量评分较低: {quality_result['score']}/100")
+            else:
+                logger.info(f"质量评分: {quality_result['score']}/100")
+        
+        # 新增：格式化
+        if format_code:
+            logger.info("格式化代码...")
+            code = self.quality_checker.format_code(code, "python")
+        
         metadata = self._generate_metadata(spec)
+        if quality_result:
+            metadata['quality'] = {
+                'score': quality_result.get('score', 0),
+                'passed': quality_result.get('passed', False),
+                'checks_count': len(quality_result.get('checks', [])),
+                'errors_count': len(quality_result.get('errors', [])),
+                'warnings_count': len(quality_result.get('warnings', []))
+            }
+        
+        # 新增：代码统计
+        stats = self.quality_checker.analyze_code_stats(code, "python")
         
         return {
             'name': spec.name,
             'class_name': class_name,
             'code': code,
-            'metadata': metadata
+            'metadata': metadata,
+            'quality': quality_result,  # 新增
+            'stats': stats  # 新增
         }
     
     def _generate_class_name(self, name: str) -> str:
@@ -202,7 +246,6 @@ class CodeGenerator:
             'click': 'import click',
             'yaml': 'import yaml',
             'toml': 'import toml',
-            # SD 相关依赖 - 使用 try/except 包装，避免构建时出错
             'diffusers': '# import diffusers  # 可选依赖',
             'torch': '# import torch  # 可选依赖',
             'transformers': '# import transformers  # 可选依赖',
@@ -218,7 +261,6 @@ class CodeGenerator:
             elif dep:
                 imports.append(f'# import {dep}  # 可选依赖')
         
-        # 添加标准库
         standard_imports = [
             'import os',
             'import sys',
@@ -271,7 +313,6 @@ class CodeGenerator:
         """生成辅助方法"""
         helpers = []
         
-        # 数据处理辅助方法
         if any('读取' in step or 'load' in step.lower() for step in spec.steps):
             helpers.append('''
     def _load_data(self, source: str, **kwargs):
@@ -291,7 +332,6 @@ class CodeGenerator:
                 return f.read()
 ''')
         
-        # 保存辅助方法
         if any('保存' in step or 'save' in step.lower() for step in spec.steps):
             helpers.append('''
     def _save_data(self, data: Any, destination: str, **kwargs):
@@ -310,7 +350,6 @@ class CodeGenerator:
                 f.write(str(data))
 ''')
         
-        # 验证辅助方法
         if any('验证' in step or 'validate' in step.lower() for step in spec.steps):
             helpers.append('''
     def _validate_data(self, data: Any, rules: Dict = None, **kwargs) -> bool:
@@ -324,16 +363,15 @@ class CodeGenerator:
         return True
 ''')
         
-        # 错误处理
         helpers.append('''
     def _handle_error(self, error: Exception, context: str = "") -> Dict:
         """处理错误"""
         logger.error(f"{context}: {error}")
-        return {
+        return {{
             "status": "error",
             "error": str(error),
             "context": context
-        }
+        }}
 ''')
         
         return '\n'.join(helpers) if helpers else ''
