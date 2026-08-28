@@ -224,69 +224,65 @@ class CodeGenerator:
     def _generate_load_step(self, method_name: str, step: str) -> str:
         """生成加载步骤"""
         return f'''    def {method_name}(self, **kwargs):
-        """
-        {step}
-        """
-        logger.info(f"执行步骤: {step}")
+            """
+            {step}
+            """
+            logger.info(f"执行步骤: {step}")
+            
+            # 获取数据源
+            source = kwargs.get("source") or kwargs.get("file_path") or kwargs.get("data_source")
+            if not source:
+                for key in ["md_file", "file", "path", "input"]:
+                    if key in kwargs and kwargs[key]:
+                        source = kwargs[key]
+                        break
+            
+            if not source:
+                raise ValueError("未指定数据源")
+            
+            try:
+                data = self._load_data(source, **kwargs)
+                kwargs["data"] = data
+                logger.info(f"数据加载成功: {{source}}")  # ✅ 改这里
+            except Exception as e:
+                logger.error(f"数据加载失败: {{e}}")
+                raise
+            
+            return kwargs'''
         
-        # 获取数据源
-        source = kwargs.get("source") or kwargs.get("file_path") or kwargs.get("data_source")
-        if not source:
-            # 尝试从常见参数名获取
-            for key in ["md_file", "file", "path", "input"]:
-                if key in kwargs and kwargs[key]:
-                    source = kwargs[key]
-                    break
-        
-        if not source:
-            raise ValueError("未指定数据源")
-        
-        # 加载数据
-        try:
-            data = self._load_data(source, **kwargs)
-            kwargs["data"] = data
-            logger.info(f"数据加载成功: {source}")
-        except Exception as e:
-            logger.error(f"数据加载失败: {e}")
-            raise
-        
-        return kwargs'''
-    
     def _generate_save_step(self, method_name: str, step: str) -> str:
         """生成保存步骤"""
         return f'''    def {method_name}(self, **kwargs):
-        """
-        {step}
-        """
-        logger.info(f"执行步骤: {step}")
+            """
+            {step}
+            """
+            logger.info(f"执行步骤: {step}")
+            
+            data = kwargs.get("data") or kwargs.get("result")
+            destination = kwargs.get("destination") or kwargs.get("output") or kwargs.get("output_path")
+            
+            if not destination:
+                for key in ["output_file", "save_path", "path"]:
+                    if key in kwargs and kwargs[key]:
+                        destination = kwargs[key]
+                        break
+            
+            if not destination:
+                raise ValueError("未指定保存路径")
+            
+            if data is None:
+                raise ValueError("没有数据可保存")
+            
+            try:
+                self._save_data(data, destination, **kwargs)
+                kwargs["saved_path"] = destination
+                logger.info(f"数据保存成功: {{destination}}")  # ✅ 改这里
+            except Exception as e:
+                logger.error(f"数据保存失败: {{e}}")
+                raise
+            
+            return kwargs'''
         
-        # 获取数据和目标路径
-        data = kwargs.get("data") or kwargs.get("result")
-        destination = kwargs.get("destination") or kwargs.get("output") or kwargs.get("output_path")
-        
-        if not destination:
-            for key in ["output_file", "save_path", "path"]:
-                if key in kwargs and kwargs[key]:
-                    destination = kwargs[key]
-                    break
-        
-        if not destination:
-            raise ValueError("未指定保存路径")
-        
-        if data is None:
-            raise ValueError("没有数据可保存")
-        
-        # 保存数据
-        try:
-            self._save_data(data, destination, **kwargs)
-            kwargs["saved_path"] = destination
-            logger.info(f"数据保存成功: {destination}")
-        except Exception as e:
-            logger.error(f"数据保存失败: {e}")
-            raise
-        
-        return kwargs'''
-    
     def _generate_process_step(self, method_name: str, step: str) -> str:
         """生成处理步骤"""
         return f'''    def {method_name}(self, **kwargs):
@@ -314,7 +310,7 @@ class CodeGenerator:
             kwargs["data"] = processed
             logger.info(f"数据处理完成")
         except Exception as e:
-            logger.error(f"数据处理失败: {e}")
+            logger.error(f"数据处理失败: {{e}}")
             raise
         
         return kwargs'''
@@ -344,7 +340,7 @@ class CodeGenerator:
             kwargs["analysis"] = analysis_result
             logger.info(f"数据分析完成: {len(str(analysis_result))} 字符")
         except Exception as e:
-            logger.error(f"数据分析失败: {e}")
+            logger.error(f"数据分析失败: {{e}}")
             raise
         
         return kwargs'''
@@ -352,82 +348,75 @@ class CodeGenerator:
     def _generate_validate_step(self, method_name: str, step: str) -> str:
         """生成验证步骤"""
         return f'''    def {method_name}(self, **kwargs):
-        """
-        {step}
-        """
-        logger.info(f"执行步骤: {step}")
-        
-        # 获取要验证的数据
-        data = kwargs.get("data") or kwargs.get("input_data")
-        if data is None:
-            for key in ["content", "text", "result"]:
-                if key in kwargs and kwargs[key]:
-                    data = kwargs[key]
-                    break
-        
-        if data is None:
-            raise ValueError("没有数据可验证")
-        
-        # 验证数据
-        try:
-            is_valid = self._validate_data(data, **kwargs)
-            if not is_valid:
-                raise ValueError("数据验证失败")
-            kwargs["validated"] = True
-            logger.info(f"数据验证通过")
-        except Exception as e:
-            logger.error(f"数据验证失败: {e}")
-            raise
-        
-        return kwargs'''
+            """
+            {step}
+            """
+            logger.info(f"执行步骤: {step}")
+            
+            # 获取要验证的数据
+            data = kwargs.get("data") or kwargs.get("input_data")
+            if data is None:
+                for key in ["content", "text", "result"]:
+                    if key in kwargs and kwargs[key]:
+                        data = kwargs[key]
+                        break
+            
+            if data is None:
+                raise ValueError("没有数据可验证")
+            
+            # 验证数据
+            try:
+                is_valid = self._validate_data(data, **kwargs)
+                if not is_valid:
+                    raise ValueError("数据验证失败")
+                kwargs["validated"] = True
+                logger.info(f"数据验证通过")
+            except Exception as e:
+                logger.error(f"数据验证失败: {{e}}")
+                raise
+            
+            return kwargs'''
     
     def _generate_generate_step(self, method_name: str, step: str) -> str:
         """生成生成步骤"""
         return f'''    def {method_name}(self, **kwargs):
-        """
-        {step}
-        """
-        logger.info(f"执行步骤: {step}")
+            """
+            {step}
+            """
+            logger.info(f"执行步骤: {step}")
+            
+            params = {{k: v for k, v in kwargs.items() if k not in ["self"]}}
+            
+            try:
+                result = self._generate_result(params, **kwargs)
+                kwargs["generated"] = result
+                logger.info(f"生成完成")
+            except Exception as e:
+                logger.error(f"生成失败: {{e}}")
+                raise
+            
+            return kwargs'''
         
-        # 获取参数
-        params = {{k: v for k, v in kwargs.items() if k not in ["self"]}}
-        
-        # 生成结果
-        try:
-            result = self._generate_result(params, **kwargs)
-            kwargs["generated"] = result
-            logger.info(f"生成完成")
-        except Exception as e:
-            logger.error(f"生成失败: {e}")
-            raise
-        
-        return kwargs'''
-    
     def _generate_generic_step(self, method_name: str, step: str) -> str:
         """生成通用步骤"""
         return f'''    def {method_name}(self, **kwargs):
-        """
-        {step}
-        """
-        logger.info(f"执行步骤: {step}")
+            """
+            {step}
+            """
+            logger.info(f"执行步骤: {step}")
+            
+            # 通用处理逻辑
+            input_data = kwargs.get("data") or kwargs.get("input")
+            
+            if input_data is not None:
+                if isinstance(input_data, (list, dict)):
+                    logger.info(f"处理数据: {{len(input_data)}} 项")
+                else:
+                    logger.info(f"处理数据: {{type(input_data).__name__}}")
+                kwargs["processed"] = input_data
+            
+            return kwargs'''
         
-        # 通用处理逻辑
-        # 根据需求: {step}
-        
-        # 获取输入
-        input_data = kwargs.get("data") or kwargs.get("input")
-        
-        # 处理
-        if input_data is not None:
-            # 默认处理：记录数据
-            if isinstance(input_data, (list, dict)):
-                logger.info(f"处理数据: {len(input_data)} 项")
-            else:
-                logger.info(f"处理数据: {type(input_data).__name__}")
-            kwargs["processed"] = input_data
-        
-        return kwargs'''
-    
     # ==================== 阶段3：优化辅助方法 ====================
     
     def _generate_helper_methods(self, spec: SkillSpec, has_steps: bool) -> str:
