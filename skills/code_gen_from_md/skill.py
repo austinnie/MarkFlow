@@ -19,15 +19,15 @@ code_gen_from_md - 代码生成器，从 Markdown 需求文档自动生成高质
   - generated_at: 生成时间
 """
 
-import sys
-import time
+# import black  # 可选依赖
 import random
+import re
+import time
+import sys
+import requests
+# import pylint  # 可选依赖
 import json
 import os
-import requests
-import re
-# import pylint  # 可选依赖
-# import black  # 可选依赖
 
 import logging
 from typing import Dict, Any, Optional, List

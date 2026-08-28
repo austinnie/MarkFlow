@@ -64,7 +64,13 @@ def main():
     build_parser.add_argument("--model", "-m", default="qwen2.5:7b", 
                               help="Ollama模型名称（用于审查）")
     build_parser.add_argument("--verbose", "-v", action="store_true", help="显示详细日志")  # 新增                              
-                              
+          
+    #自动根据AI审查结果修复代码（需配合 --review 使用）           
+    build_parser.add_argument("--auto-fix", "-f", action="store_true",
+                             help="自动根据AI审查结果修复代码（需配合 --review 使用）")
+    build_parser.add_argument("--iterations", "-i", type=int, default=1,
+                             help="AI 优化迭代次数 (默认: 1)")
+                         
     # execute命令
     exec_parser = subparsers.add_parser("execute", help="执行技能")
     exec_parser.add_argument("skill", help="技能名称")
@@ -155,6 +161,9 @@ def build_skill(args, executor, console):
     review = args.review
     model = args.model
     
+    auto_fix = args.auto_fix
+    iterations = args.iterations    
+    
     try:
         # ========== 读取并解析 ==========
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -162,15 +171,30 @@ def build_skill(args, executor, console):
 
           
         # ========== 构建技能 ==========
-        result = executor.build_from_markdown(
-            content, 
-            save=not args.no_save,
-            quality_check=quality_check,
-            format_code=format_code,
-            generate_tests=generate_tests,
-            review=review,
-            model=model
-        )
+        # 构建技能
+        if auto_fix:
+            console.print(f"🔧 启用自动修复模式，迭代 {iterations} 次")
+            result = executor.build_from_markdown_with_auto_fix(
+                content,
+                save=not args.no_save,
+                quality_check=quality_check,
+                format_code=format_code,
+                generate_tests=generate_tests,
+                review=review,
+                auto_fix=auto_fix,
+                iterations=iterations,
+                model=model
+            )
+        else:
+            result = executor.build_from_markdown(
+                content,
+                save=not args.no_save,
+                quality_check=quality_check,
+                format_code=format_code,
+                generate_tests=generate_tests,
+                review=review,
+                model=model
+            )
         
         # ========== 显示结果 ==========
         console.print("\n[bold green]✅ 技能构建成功![/bold green]")
@@ -209,10 +233,11 @@ def build_skill(args, executor, console):
             deps = ", ".join(result['metadata']['dependencies'])
             console.print("  依赖: [yellow]{}[/yellow]".format(deps))
         
+
         # 显示保存位置
         if not args.no_save:
             skill_dir = executor.registry.storage_dir / result['class_name'].lower()
-            console.print("  保存位置: [blue]{}[/blue]".format(skill_dir))
+            console.print(f"  保存位置: [blue]{skill_dir}[/blue]")
         
         # ========== 显示审查结果 ==========
         if review and result.get('review'):

@@ -43,7 +43,12 @@ class CodeQualityChecker:
             "错误处理",
             "文档完整",
         ]
-    
+        
+    @property
+    def ollama_url(self) -> str:
+        """获取 Ollama URL"""
+        return self.config.get('ollama_url', 'http://localhost:11434')
+        
     # ==================== 语法检查 ====================
     
     def validate_python_syntax(self, code: str) -> Tuple[bool, str]:
@@ -265,7 +270,7 @@ class CodeQualityChecker:
             response = requests.post(
                 f"{ollama_url}/api/generate",
                 json=payload,
-                timeout=300  # 增加到 300 秒
+                timeout=600  # 增加到 300 秒
             )
             print(f"📡 响应状态码: {response.status_code}")
             response.raise_for_status()
