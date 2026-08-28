@@ -3,7 +3,7 @@
 技能执行器 - 执行和管理技能
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Set
 from pathlib import Path
 import logging
 from .registry import SkillRegistry
@@ -15,6 +15,7 @@ from .project_builder import ProjectBuilder  # 新增导入
 logger = logging.getLogger(__name__)
 
 from .project_builder import ProjectBuilder  # 新增导入
+import json  
 
 class SkillExecutor:
     """技能执行器"""
@@ -26,6 +27,69 @@ class SkillExecutor:
         self.project_builder = ProjectBuilder()  # 新增
         self.quality_checker = CodeQualityChecker()  # 新增
 
+    # ==================== 新增配置处理方法 ====================
+    
+    def apply_config_defaults(
+        self,
+        user_config: Dict[str, Any],
+        defaults: Dict[str, Any],
+        extra_valid_keys: Set[str] = None,
+        skill_name: str = None
+    ) -> Dict[str, Any]:
+        """
+        应用配置默认值，过滤未知键
+        
+        Args:
+            user_config: 用户传入的配置
+            defaults: 默认配置
+            extra_valid_keys: 额外允许的有效键（如 log_level）
+            skill_name: 技能名称（用于日志）
+        
+        Returns:
+            合并后的配置
+        """
+        valid_keys = set(defaults.keys())
+        if extra_valid_keys:
+            valid_keys |= set(extra_valid_keys)
+        
+        # 过滤用户配置，只保留有效键
+        filtered_config = {k: v for k, v in user_config.items() if k in valid_keys}
+        
+        # 记录被忽略的键
+        ignored_keys = set(user_config.keys()) - valid_keys
+        if ignored_keys:
+            name = skill_name or "Unknown"
+            logger.warning(f"[{name}] 忽略未知配置键: {', '.join(ignored_keys)}")
+        
+        # 合并默认值
+        result = defaults.copy()
+        result.update(filtered_config)
+        
+        return result
+    
+    def get_skill_default_config(self, skill_name: str) -> Dict[str, Any]:
+        """
+        从技能的 meta.json 获取默认配置
+        
+        Args:
+            skill_name: 技能名称
+        
+        Returns:
+            默认配置字典
+        """
+        skill_dir = self.registry.storage_dir / skill_name
+        meta_file = skill_dir / "meta.json"
+        
+        if meta_file.exists():
+            try:
+                with open(meta_file, 'r', encoding='utf-8') as f:
+                    meta = json.load(f)
+                return meta.get('config', {})
+            except Exception as e:
+                logger.warning(f"读取 {skill_name} 的 meta.json 失败: {e}")
+        
+        return {}
+        
     def build_from_markdown(self, markdown_content: str, save: bool = True,
                             quality_check: bool = True, format_code: bool = True,
                             generate_tests: bool = True, review: bool = False,
@@ -323,12 +387,30 @@ class SkillExecutor:
         Args:
             skill_name: 技能名称
             **kwargs: 执行参数
-            
+        
         Returns:
             执行结果
         """
         try:
             instance = self.registry.get_instance(skill_name)
+            
+            # ✅ 自动应用配置默认值到 instance.config
+            if hasattr(instance, 'config') and hasattr(instance, 'name'):
+                # 获取技能内置默认配置（如果有 _get_default_config 方法）
+                if hasattr(instance, '_get_default_config'):
+                    defaults = instance._get_default_config()
+                else:
+                    # 从 meta.json 获取
+                    defaults = self.get_skill_default_config(instance.name)
+                
+                if defaults:
+                    instance.config = self.apply_config_defaults(
+                        instance.config,
+                        defaults,
+                        extra_valid_keys={'log_level'},
+                        skill_name=instance.name
+                    )
+            
             return instance.execute(**kwargs)
         except Exception as e:
             logger.error(f"执行技能失败: {e}")
