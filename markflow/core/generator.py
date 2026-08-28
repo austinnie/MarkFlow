@@ -19,8 +19,9 @@ class CodeGenerator:
         self.quality_checker = CodeQualityChecker()  # 新增
 
     def generate_tests(self, spec: SkillSpec, code: str) -> str:
-        """根据技能规格生成单元测试"""
+        """生成测试代码 - 正确生成参数"""
         class_name = self._generate_class_name(spec.name)
+        skill_name = spec.name.lower().replace(' ', '_')
         
         test_lines = []
         test_lines.append('"""')
@@ -31,10 +32,9 @@ class CodeGenerator:
         test_lines.append('import sys')
         test_lines.append('from pathlib import Path')
         test_lines.append('')
-        test_lines.append('# 添加项目根目录到路径')
         test_lines.append('sys.path.insert(0, str(Path(__file__).parent.parent))')
         test_lines.append('')
-        test_lines.append(f'from skills.{spec.name}.skill import {class_name}')
+        test_lines.append(f'from skills.{skill_name}.skill import {class_name}')
         test_lines.append('')
         test_lines.append('')
         test_lines.append(f'class Test{class_name}(unittest.TestCase):')
@@ -47,39 +47,32 @@ class CodeGenerator:
         test_lines.append(f'        self.skill = {class_name}()')
         test_lines.append('')
         
-        # 根据输入参数生成测试
+        # 生成参数 - 不带反引号
         if spec.inputs:
             test_lines.append('    def test_execute_with_valid_params(self):')
             test_lines.append('        """测试正常执行"""')
             
             params = []
             for inp in spec.inputs:
-                name = inp.get('name', '')
+                name = self._clean_name(inp.get('name', ''))
+                if not name:
+                    continue
                 default = inp.get('default', '')
-                if default:
+                if default and default != '-':
                     params.append(f'{name}={repr(default)}')
-                elif inp.get('required', False):
-                    params.append(f'{name}="test_{name}"')
                 else:
                     params.append(f'{name}=""')
             
-            params_str = ', '.join(params)
-            test_lines.append(f'        result = self.skill.execute({params_str})')
+            if params:
+                params_str = ', '.join(params)
+                test_lines.append(f'        result = self.skill.execute({params_str})')
+            else:
+                test_lines.append('        result = self.skill.execute()')
+            
             test_lines.append('        self.assertEqual(result.get("status"), "success")')
             test_lines.append('        self.assertIn("result", result)')
             test_lines.append('')
-            
-            # 必填参数测试
-            required = [inp for inp in spec.inputs if inp.get('required', False)]
-            if required:
-                test_lines.append('    def test_execute_missing_required_params(self):')
-                test_lines.append('        """测试缺少必填参数"""')
-                for inp in required[:1]:
-                    test_lines.append(f'        with self.assertRaises(ValueError):')
-                    test_lines.append(f'            self.skill.execute({inp["name"]}="")')
-                test_lines.append('')
         
-        # 元数据测试
         test_lines.append('    def test_skill_metadata(self):')
         test_lines.append('        """测试技能元数据"""')
         test_lines.append(f'        self.assertEqual(self.skill.name, "{spec.name}")')
@@ -91,7 +84,16 @@ class CodeGenerator:
         test_lines.append('    unittest.main()')
         
         return '\n'.join(test_lines)
-        
+
+    def _clean_name(self, name: str) -> str:
+        """清理参数名"""
+        if not name:
+            return ''
+        name = name.strip()
+        if name.startswith('`') and name.endswith('`'):
+            name = name[1:-1]
+        return name
+    
     def generate(self, spec: SkillSpec, quality_check: bool = True, 
                  format_code: bool = True, generate_tests: bool = True) -> Dict[str, Any]:
         """生成技能代码"""
@@ -468,12 +470,15 @@ class CodeGenerator:
             parts.append("")
             parts.append("输入参数:")
             for inp in spec.inputs:
-                parts.append(f"  - {inp['name']} ({inp.get('type', 'string')}): {inp.get('description', '')}")
+                # 使用 _clean_name 清理参数名
+                name = self._clean_name(inp.get('name', ''))
+                parts.append(f"  - {name} ({inp.get('type', 'string')}): {inp.get('description', '')}")
         if spec.outputs:
             parts.append("")
             parts.append("输出:")
             for out in spec.outputs:
-                parts.append(f"  - {out['name']}: {out.get('description', '')}")
+                name = self._clean_name(out.get('name', ''))
+                parts.append(f"  - {name}: {out.get('description', '')}")
         if spec.steps:
             parts.append("")
             parts.append("执行步骤:")

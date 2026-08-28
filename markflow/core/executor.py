@@ -9,6 +9,8 @@ import logging
 from .registry import SkillRegistry
 from .generator import CodeGenerator
 from .parser import MarkdownParser, SkillSpec
+from .quality import CodeQualityChecker  # 新增导入
+from .project_builder import ProjectBuilder  # 新增导入
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +24,7 @@ class SkillExecutor:
         self.parser = MarkdownParser()
         self.generator = CodeGenerator()
         self.project_builder = ProjectBuilder()  # 新增
+        self.quality_checker = CodeQualityChecker()  # 新增
 
     def build_from_markdown(self, markdown_content: str, save: bool = True,
                             quality_check: bool = True, format_code: bool = True,
