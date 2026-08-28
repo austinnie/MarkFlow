@@ -63,6 +63,7 @@ def main():
                               help="禁用代码格式化")
     build_parser.add_argument("--model", "-m", default="qwen2.5:7b", 
                               help="Ollama模型名称（用于审查）")
+    build_parser.add_argument("--verbose", "-v", action="store_true", help="显示详细日志")  # 新增                              
                               
     # execute命令
     exec_parser = subparsers.add_parser("execute", help="执行技能")
@@ -134,7 +135,13 @@ def build_skill(args, executor, console):
     """构建技能"""
     from pathlib import Path
     import sys
+    import logging
     
+    # 设置日志级别
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+        logging.getLogger('markflow').setLevel(logging.DEBUG)
+        
     file_path = Path(args.file)
     
     if not file_path.exists():

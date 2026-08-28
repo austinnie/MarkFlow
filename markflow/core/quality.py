@@ -247,24 +247,50 @@ class CodeQualityChecker:
         """使用 Ollama 进行 AI 代码审查"""
         import requests
         
+        print(f"🔍 调用 Ollama: {ollama_url}, 模型: {model}")
+        
         prompt = self._build_review_prompt(code, language)
+        
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.3,
+                "num_predict": 2048  # 减少输出长度，加快响应
+            }
+        }
         
         try:
             response = requests.post(
                 f"{ollama_url}/api/generate",
-                json={
-                    "model": model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {"temperature": 0.3}
-                },
-                timeout=120
+                json=payload,
+                timeout=300  # 增加到 300 秒
             )
+            print(f"📡 响应状态码: {response.status_code}")
             response.raise_for_status()
             data = response.json()
             review_text = data.get("response", "").strip()
             
+            if not review_text:
+                return {
+                    "score": 0,
+                    "dimensions": {},
+                    "issues": ["Ollama 返回空响应"],
+                    "suggestions": [],
+                    "summary": "无法完成 AI 审查"
+                }
+            
             return self._parse_review_response(review_text)
+        except requests.exceptions.Timeout:
+            logger.error("AI 审查超时")
+            return {
+                "score": 0,
+                "dimensions": {},
+                "issues": ["审查超时，请检查 Ollama 服务"],
+                "suggestions": [],
+                "summary": "无法完成 AI 审查"
+            }
         except Exception as e:
             logger.error(f"AI 审查失败: {e}")
             return {
@@ -274,13 +300,18 @@ class CodeQualityChecker:
                 "suggestions": [],
                 "summary": "无法完成 AI 审查"
             }
-    
+        
     def _build_review_prompt(self, code: str, language: str) -> str:
-        """构建审查 Prompt"""
+        """构建审查 Prompt - 精简版"""
+        # 只取代码的前 2000 字符进行审查
+        code_preview = code[:2000]
+        if len(code) > 2000:
+            code_preview += "\n... (代码已截断)"
+        
         prompt = '请对以下 ' + language + ' 代码进行代码审查：\n\n'
         prompt += '代码：\n'
         prompt += '```' + language + '\n'
-        prompt += code + '\n'
+        prompt += code_preview + '\n'
         prompt += '```\n\n'
         prompt += '请从以下维度审查：\n'
         prompt += '1. 功能完整性\n'
@@ -294,7 +325,13 @@ class CodeQualityChecker:
         prompt += '{\n'
         prompt += '    "score": 0-100,\n'
         prompt += '    "dimensions": {\n'
-        prompt += '        "维度名": 0-10\n'
+        prompt += '        "功能完整性": 0-10,\n'
+        prompt += '        "代码可读性": 0-10,\n'
+        prompt += '        "性能效率": 0-10,\n'
+        prompt += '        "安全性": 0-10,\n'
+        prompt += '        "可维护性": 0-10,\n'
+        prompt += '        "错误处理": 0-10,\n'
+        prompt += '        "文档完整": 0-10\n'
         prompt += '    },\n'
         prompt += '    "issues": ["问题1", "问题2"],\n'
         prompt += '    "suggestions": ["建议1", "建议2"],\n'
@@ -305,20 +342,24 @@ class CodeQualityChecker:
     
     def _parse_review_response(self, response: str) -> Dict:
         """解析 AI 审查响应"""
+        import json
+        
         try:
-            review = json.loads(response)
-            return review
-        except json.JSONDecodeError:
-            # 尝试从文本中提取 JSON
-            json_match = re.search(r'\{[^{}]*\}', response, re.DOTALL)
+            # 尝试提取 JSON 代码块
+            json_match = re.search(r'```json\s*\n(.*?)\n```', response, re.DOTALL)
             if json_match:
-                try:
-                    review = json.loads(json_match.group())
-                    return review
-                except:
-                    pass
+                response = json_match.group(1)
             
-            # 降级：提取分数
+            review = json.loads(response)
+            return {
+                "score": review.get("score", 0),
+                "dimensions": review.get("dimensions", {}),
+                "issues": review.get("issues", []),
+                "suggestions": review.get("suggestions", []),
+                "summary": review.get("summary", ""),
+            }
+        except json.JSONDecodeError:
+            # 尝试提取分数
             score_match = re.search(r'"score":\s*(\d+)', response)
             score = int(score_match.group(1)) if score_match else 0
             
@@ -330,10 +371,10 @@ class CodeQualityChecker:
             return {
                 "score": score,
                 "dimensions": {},
-                "issues": issues_list,
+                "issues": issues_list if issues_list else ["无法解析审查结果"],
                 "suggestions": [],
                 "summary": response[:200] + "..." if len(response) > 200 else response,
             }
-    
+        
     def __repr__(self):
         return f"<CodeQualityChecker(black={BLACK_AVAILABLE}, pylint={PYLINT_AVAILABLE})>"
