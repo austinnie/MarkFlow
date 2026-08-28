@@ -108,13 +108,16 @@ class DocGenerator:
             'imports': [],
             'classes': [],
             'functions': [],
-            'constants': []
+            'constants': [],
+            'content': ''  # ✅ 新增这行
         }
 
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-
+            
+            result['content'] = content  # ✅ 新增这行，保存内容
+            
             tree = ast.parse(content)
 
             module_doc = ast.get_docstring(tree)
@@ -357,27 +360,39 @@ class DocGenerator:
     def _extract_skill_features(self, parsed_files: List[Dict], project_name: str) -> Dict[str, Any]:
         """自动从代码中提取技能特征"""
         features = {
-            'capabilities': [],      # 功能列表
-            'supported_langs': {},   # 支持的语言
-            'data_sources': [],      # 数据源
-            'categories': [],        # 分类
-            'features_table': [],    # 功能表格
-            'dependencies': [],      # 额外依赖
-            'special_notes': []      # 特殊说明
+            'capabilities': [],
+            'supported_langs': {},
+            'data_sources': [],
+            'categories': [],
+            'features_table': [],
+            'dependencies': [],
+            'special_notes': []
         }
         
-        # 收集所有代码内容
+        # 收集所有代码内容（直接从文件读取）
         all_content = ""
         for f in parsed_files:
-            if 'content' in f:
-                all_content += f.get('content', '') + "\n"
+            file_path_str = f.get('file_path', '')
+            if file_path_str:
+                try:
+                    with open(file_path_str, 'r', encoding='utf-8') as f_read:
+                        content = f_read.read()
+                        all_content += content + "\n"
+                except Exception as e:
+                    logger.warning(f"读取文件失败 {file_path_str}: {e}")
+        
+        if not all_content:
+            # 降级：从 docstring 获取
+            for f in parsed_files:
+                docstring = f.get('docstring', '')
+                if docstring:
+                    all_content += docstring + "\n"
         
         # 1. 检测并提取功能列表（从 docstring 或注释中）
         for file_info in parsed_files:
             # 从模块 docstring 提取
             docstring = file_info.get('docstring', '')
             if docstring:
-                # 提取功能描述
                 lines = docstring.split('\n')
                 for line in lines:
                     if any(kw in line.lower() for kw in ['功能', '特性', '支持', 'feature', 'capability']):
@@ -393,7 +408,6 @@ class DocGenerator:
                             if line.strip() and not line.strip().startswith(('"""', "'''")):
                                 features['capabilities'].append(line.strip())
                 
-                # 检查方法名来推断功能
                 for method in cls.get('methods', []):
                     method_name = method.get('name', '')
                     if method_name.startswith(('play', 'search', 'download', 'generate', 'export', 'import', 
@@ -416,7 +430,6 @@ class DocGenerator:
                             features['capabilities'].append(action)
         
         # 2. 提取支持的语言（从常量、配置或注释中）
-        # 查找常见语言配置
         lang_patterns = [
             r'SUPPORTED_LANGUAGES\s*=\s*\{([^}]+)\}',
             r'LANGUAGES\s*=\s*\[([^\]]+)\]',
@@ -429,7 +442,6 @@ class DocGenerator:
             match = re.search(pattern, all_content, re.IGNORECASE | re.DOTALL)
             if match:
                 lang_str = match.group(1)
-                # 尝试提取语言名称
                 lang_names = re.findall(r'["\'](\w+)["\']', lang_str)
                 if lang_names:
                     lang_map = {
@@ -524,7 +536,7 @@ class DocGenerator:
                     features['dependencies'].append(imp.split('.')[0] if '.' in imp else imp)
         
         return features
-
+    
     def _generate_readme_md(self, parsed_files: List[Dict], project_name: str,
                            project_description: str, author: str) -> str:
         """生成 README 文档 - 智能版"""
