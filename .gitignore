@@ -31,4 +31,6 @@ skills/*/output/*
 *.txt
 
 # “úu
-*.log
+*.log.env 
+.env 
+output/ 

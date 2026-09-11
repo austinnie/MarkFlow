@@ -1,0 +1,222 @@
+# config/settings.py - 在 Settings 类中添加
+# config/settings.py
+import os
+from pathlib import Path
+from dataclasses import dataclass, field   # ✅ 添加这一行
+from typing import Optional
+
+from dotenv import load_dotenv
+
+# ✅ 添加调试：打印 .env 加载状态
+env_path = Path(__file__).parent.parent / ".env"
+print(f"📂 .env 文件路径: {env_path}")
+print(f"📂 .env 文件是否存在: {env_path.exists()}")
+
+load_dotenv()
+
+# ✅ 添加调试：打印读取到的值
+print(f"📂 VIDEO_DURATION 原始值: {os.getenv('VIDEO_DURATION')}")
+
+@dataclass
+class Settings:
+    """全局配置"""
+    
+    BASE_DIR: Path = field(default_factory=lambda: Path(__file__).parent.parent)
+    
+    # --- 模型路径 ---
+    model_path: str = os.getenv("SD_MODEL_PATH", "")
+    lora_path: str = os.getenv("LORA_PATH", "")
+    vae_path: str = os.getenv("VAE_PATH", "")
+    
+    # --- LLM 配置 ---
+    llm_enabled: bool = os.getenv("LLM_ENABLED", "true").lower() == "true"
+    ollama_url: str = os.getenv("OLLAMA_URL", "http://localhost:11434")
+    ollama_model: str = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
+    
+    # --- API 配置 ---
+    generation_mode: str = os.getenv("GENERATION_MODE", "local")
+    api_provider: str = os.getenv("API_PROVIDER", "pollinations")
+    
+    # ----- 通义万相 (阿里云百炼) -----
+    tongyi_api_key: str = os.getenv("TONGYI_API_KEY", "")
+    tongyi_model: str = os.getenv("TONGYI_MODEL", "wan2.1-t2i-plus")
+    tongyi_base_url: str = os.getenv("TONGYI_BASE_URL", "")
+    
+    # ----- 文心一格 (百度) -----
+    yige_api_key: str = os.getenv("YIGE_API_KEY", "")
+    yige_secret_key: str = os.getenv("YIGE_SECRET_KEY", "")
+    
+    # ----- 腾讯混元 -----
+    hunyuan_secret_id: str = os.getenv("HUNYUAN_SECRET_ID", "")
+    hunyuan_secret_key: str = os.getenv("HUNYUAN_SECRET_KEY", "")
+    
+    # ----- HuggingFace -----
+    hf_api_token: str = os.getenv("HF_API_TOKEN", "")
+    hf_model: str = os.getenv("HF_MODEL", "sdxl")
+    
+    # ----- Pollinations AI (完全免费，无需 API Key) -----
+    pollinations_model: str = os.getenv("POLLINATIONS_MODEL", "flux")
+    
+    # ----- Agnes AI (需注册获取 API Key) -----
+    agnes_api_key: str = os.getenv("AGNES_API_KEY", "")
+    agnes_model: str = os.getenv("AGNES_MODEL", "flux")
+    agnes_image_model: str = os.getenv("AGNES_IMAGE_MODEL", "agnes-image-2.1-flash")
+    agnes_text_model: str = os.getenv("AGNES_TEXT_MODEL", "agnes-2.5-flash")
+    agnes_video_model: str = os.getenv("AGNES_VIDEO_MODEL", "agnes-video-v2.0")
+    agnes_vision_model: str = os.getenv("AGNES_VISION_MODEL", "agnes-2.5-flash")
+    agnes_base_url: str = os.getenv("AGNES_BASE_URL", "https://apihub.agnes-ai.com/v1")
+
+    # 视频生成默认时长（秒）- Agnes API 固定 60 秒
+    video_duration: int = int(os.getenv("VIDEO_DURATION", "60"))
+
+    # ✅ 新增：是否启用循环拼接（将长视频拆分为 10 秒片段）
+    video_auto_merge: bool = os.getenv("VIDEO_AUTO_MERGE", "false").lower() == "true"
+    
+    # ✅ 新增：API 固定单段时长
+    video_segment_duration: int = int(os.getenv("VIDEO_SEGMENT_DURATION", "10"))
+    
+    # ----- Free API (社区免费代理，无需注册) -----
+    freeapi_model: str = os.getenv("FREEAPI_MODEL", "flux")
+    
+    # ✅ 新增 Replicate API
+    replicate_api_token: str = os.getenv("REPLICATE_API_TOKEN", "")
+    replicate_model: str = os.getenv("REPLICATE_MODEL", "stability-ai/stable-diffusion")
+    
+    # ✅ 新增 Stability AI API
+    stability_api_key: str = os.getenv("STABILITY_API_KEY", "")
+    stability_model: str = os.getenv("STABILITY_MODEL", "stable-diffusion-xl-1024-v1-0")
+    
+    # --- 生成参数 ---
+    default_steps: int = int(os.getenv("DEFAULT_STEPS", "20"))
+    default_cfg: float = float(os.getenv("DEFAULT_CFG", "7.5"))
+    default_strength: float = float(os.getenv("DEFAULT_STRENGTH", "0.35"))
+    default_width: int = int(os.getenv("DEFAULT_WIDTH", "512"))
+    default_height: int = int(os.getenv("DEFAULT_HEIGHT", "768"))
+    
+    # --- 输出 ---
+    output_dir: Path = field(default_factory=lambda: Path("output"))
+    
+    # --- 安全 ---
+    safe_mode: bool = os.getenv("SAFE_MODE", "true").lower() == "true"
+    # ✅ 新增：是否启用安全检测（独立开关，默认跟随 safe_mode）
+    enable_safety_check: bool = os.getenv("ENABLE_SAFETY_CHECK", "true").lower() == "true"    
+
+
+    article_image_engine: str = os.getenv("ARTICLE_IMAGE_ENGINE", "agnes")
+    
+    def __post_init__(self):
+        self.output_dir.mkdir(exist_ok=True)
+        # 调试打印
+        print(f"📂 Settings.video_segment_duration = {self.video_segment_duration}")
+        print(f"📂 Settings.video_duration = {self.video_duration}")
+        print(f"🔒 安全检测开关: {'启用' if self.enable_safety_check else '禁用'}")
+        
+    def get_model_path(self) -> Optional[str]:
+        if self.model_path and os.path.exists(self.model_path):
+            return self.model_path
+        return None
+    
+    def get_api_config(self) -> dict:
+        """获取 API 配置"""
+        return {
+            "tongyi": {
+                "TONGYI_API_KEY": self.tongyi_api_key,
+                "TONGYI_MODEL": self.tongyi_model,
+                "TONGYI_BASE_URL": self.tongyi_base_url,
+            },
+            "yige": {
+                "YIGE_API_KEY": self.yige_api_key,
+                "YIGE_SECRET_KEY": self.yige_secret_key,
+            },
+            "hunyuan": {
+                "HUNYUAN_SECRET_ID": self.hunyuan_secret_id,
+                "HUNYUAN_SECRET_KEY": self.hunyuan_secret_key,
+            },
+            "huggingface": {
+                "HF_API_TOKEN": self.hf_api_token,
+                "HF_MODEL": self.hf_model,
+            },
+            "pollinations": {
+                "POLLINATIONS_MODEL": self.pollinations_model,
+            },
+            "agnes": {
+                "AGNES_API_KEY": self.agnes_api_key,
+                "AGNES_MODEL": self.agnes_model,
+                "AGNES_IMAGE_MODEL": self.agnes_image_model,
+                "AGNES_TEXT_MODEL": self.agnes_text_model,
+                "AGNES_VIDEO_MODEL": self.agnes_video_model,
+                "AGNES_VISION_MODEL": self.agnes_vision_model,
+                "AGNES_BASE_URL": self.agnes_base_url,
+            },
+            "freeapi": {
+                "FREEAPI_MODEL": self.freeapi_model,
+            },
+            # ✅ 新增 Replicate
+            "replicate": {
+                "REPLICATE_API_TOKEN": self.replicate_api_token,
+                "REPLICATE_MODEL": self.replicate_model,
+            },
+            # ✅ 新增 Stability
+            "stability": {
+                "STABILITY_API_KEY": self.stability_api_key,
+                "STABILITY_MODEL": self.stability_model,
+            },
+        }
+    
+    def get_provider_info(self, provider: str) -> dict:
+        """获取特定提供商的信息"""
+        providers = {
+            "tongyi": {
+                "name": "通义万相 (阿里云百炼)",
+                "requires_key": True,
+                "free": False,
+                "description": "阿里云百炼平台，需要 API Key",
+            },
+            "pollinations": {
+                "name": "Pollinations AI",
+                "requires_key": False,
+                "free": True,
+                "description": "完全免费，无需注册，开箱即用",
+            },
+            "agnes": {
+                "name": "Agnes AI",
+                "requires_key": True,
+                "free": True,
+                "description": "无限期免费，需注册获取 API Key",
+            },
+            "huggingface": {
+                "name": "HuggingFace",
+                "requires_key": True,
+                "free": True,
+                "description": "免费但有限速，需 API Token",
+            },
+            "yige": {
+                "name": "文心一格 (百度)",
+                "requires_key": True,
+                "free": False,
+                "description": "百度文心一格，按量付费",
+            },
+            "hunyuan": {
+                "name": "腾讯混元",
+                "requires_key": True,
+                "free": False,
+                "description": "腾讯混元，按量付费",
+            },
+            # ✅ 新增
+            "replicate": {
+                "name": "Replicate",
+                "requires_key": True,
+                "free": False,
+                "description": "按量付费，支持真正的图生图",
+            },
+            "stability": {
+                "name": "Stability AI",
+                "requires_key": True,
+                "free": False,
+                "description": "按量付费，支持真正的图生图",
+            },
+        }
+        return providers.get(provider, {})
+
+
+settings = Settings()
