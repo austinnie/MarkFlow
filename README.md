@@ -7,6 +7,9 @@
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
 
 MarkFlow 是一个轻量级的技能生成框架，让你用 **Markdown** 编写技能描述，自动生成可执行的 **Python** 代码。
+然后生成多个基础技能SKILLS来扩展框架的能力，每个SKILLS都实现相同接口，可用通过ＭａｒｋＦｌｏｗ框架统一调用，
+可用实现将多个ＳＫＩＬＬＳ组合起来使用，完成各种看似不可能完成的任务．一切皆是SKILLS，或者称为插件，都可用组合工作．
+和DeekSeek Harness相同理念，通过组合ＳＫＩＬＬＳ来扩展能力．
 
 ## ✨ 核心特性
 
